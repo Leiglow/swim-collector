@@ -240,6 +240,7 @@ def sites_england():
             "kind": _kind(type_from_uris(it.get("type"))),
             "district": lit(it.get("district")),
             "rainRisk": bool(it.get("waterQualityImpactedByHeavyRain")),
+            "eaRegion": lit(it.get("regionalOrganization")),
             # The regulator's own page for this beach, so every page we publish
             # can point at the source rather than asking people to take our word.
             "url": "https://environment.data.gov.uk/bwq/profiles/profile.html?site=%s"
@@ -388,6 +389,49 @@ def _tidy_class(c):
 
 def _title(s):
     return " ".join(w.capitalize() if w.isupper() and len(w) > 2 else w for w in str(s).split())
+
+
+# Which part of the country a place is in, for the filters on the site.
+#
+# England's comes from the Environment Agency's own operational regions rather
+# than lines drawn here — they publish one per bathing water, and an official
+# answer beats an invented boundary through the middle of Dorset. "Anglian" is
+# their word for the east coast and means nothing to a swimmer, so it is
+# relabelled.
+EA_REGION_LABEL = {
+    "South West": "South West",
+    "South East": "South East",
+    "North East": "North East",
+    "North West": "North West",
+    "Anglian": "East",
+    "Midlands": "Midlands",
+}
+
+# The Republic by province, because 240 sites under one heading is not a filter.
+IRISH_PROVINCE = {
+    "Carlow": "Leinster", "Dublin": "Leinster", "Kildare": "Leinster",
+    "Kilkenny": "Leinster", "Laois": "Leinster", "Longford": "Leinster",
+    "Louth": "Leinster", "Meath": "Leinster", "Offaly": "Leinster",
+    "Westmeath": "Leinster", "Wexford": "Leinster", "Wicklow": "Leinster",
+    "Clare": "Munster", "Cork": "Munster", "Kerry": "Munster",
+    "Limerick": "Munster", "Tipperary": "Munster", "Waterford": "Munster",
+    "Galway": "Connacht", "Leitrim": "Connacht", "Mayo": "Connacht",
+    "Roscommon": "Connacht", "Sligo": "Connacht",
+    "Cavan": "Ulster", "Donegal": "Ulster", "Monaghan": "Ulster",
+}
+
+
+def add_regions(sites):
+    for s in sites:
+        c = s["country"]
+        if c == "England":
+            s["region"] = EA_REGION_LABEL.get(s.pop("eaRegion", None) or "", "England")
+        elif c == "Ireland":
+            prov = IRISH_PROVINCE.get(s.get("district") or "")
+            s["region"] = ("Ireland — " + prov) if prov else "Ireland"
+        else:
+            s["region"] = c
+        s.pop("eaRegion", None)
 
 
 def add_slugs(sites):
@@ -599,6 +643,7 @@ def main():
     print("    total      %4d sites" % len(sites))
 
     sites.sort(key=lambda s: (s["country"], s["name"]))
+    add_regions(sites)
     add_slugs(sites)
     write(os.path.join(OUT, "sites.json"), {
         "built": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),

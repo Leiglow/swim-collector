@@ -767,6 +767,13 @@ def ea_incidents(feed):
     return got
 
 
+# The only forecast wordings SEPA uses to say the water is expected to be fine.
+# Matched as a closed set on purpose: anything outside it — "Awaiting Prediction"
+# before the morning run, or some future wording — must not be read as an
+# all-clear. See the verdict function for what happens to the rest.
+SEPA_CLEAR = {"good", "excellent", "no pollution risk", "normal"}
+
+
 def predictions_scotland(feed, by_country_name):
     """SEPA's daily prediction, covering 30 of Scotland's 90 beaches. The other
     60 have an annual classification and nothing else, which the page must say
@@ -1059,20 +1066,31 @@ def verdict(site, ctx):
 
     sc = ctx["sepa"].get(sid)
     if sc and sc.get("forecast"):
-        checked.append("SEPA's prediction for today")
         f = sc["forecast"].lower()
         if "pollution incident" in f:
+            checked.append("SEPA's prediction for today")
             level = raise_to("avoid")
             why.append({"t": "warning", "s": "SEPA", "text": "Pollution incident reported",
                         "at": sc.get("at")})
         elif f == "poor":
+            checked.append("SEPA's prediction for today")
             level = raise_to("caution")
             why.append({"t": "forecast", "s": "SEPA",
                         "text": "Today's prediction: poor water quality", "at": sc.get("at")})
-        else:
+        elif f in SEPA_CLEAR:
+            checked.append("SEPA's prediction for today")
             why.append({"t": "clear", "s": "SEPA",
-                        "text": "Today's prediction: " + sc["forecast"].lower(),
-                        "at": sc.get("at")})
+                        "text": "Today's prediction: " + f, "at": sc.get("at")})
+        else:
+            # SEPA carries the beach but has not said anything about it today.
+            # "Awaiting Prediction" sits in this field for every Scottish beach
+            # until their morning run lands, and for all of them again after
+            # the season — it is the ABSENCE of a prediction, and printing it
+            # as a reason once turned 19 beaches green on the strength of SEPA
+            # not having spoken. An unrecognised wording lands here too: a
+            # string this code has never seen is not evidence that the water
+            # is fine.
+            gaps.append("SEPA has not issued today's prediction for this beach yet")
     elif country == "Scotland" and ctx["feeds"]["SEPA daily prediction"].ok:
         # Only claim SEPA does not cover this beach when we actually reached
         # SEPA. If their feed is down, the gate below reports that instead.
