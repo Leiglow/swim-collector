@@ -13,9 +13,14 @@ name: Collect bathing water data
 
 on:
   schedule:
-    - cron: "0,30 5-21 * * *"     # every half hour through the day
-    - cron: "0 0-4,22-23 * * *"   # hourly overnight, to keep the history continuous
-  workflow_dispatch:               # and a button, for when you want it now
+    # GitHub treats scheduled workflows as best-effort and drops them under load,
+    # and the load is heaviest on the hour and the half hour. Asking on odd
+    # minutes, four times an hour, is what turns a two-hour gap into a half-hour
+    # one — the runs themselves take about 90 seconds and this repo is public,
+    # so the extra asking costs nothing.
+    - cron: "7,22,37,52 5-21 * * *"   # through the day
+    - cron: "17,47 0-4,22-23 * * *"   # overnight, to keep the history continuous
+  workflow_dispatch:                   # and a button, for when you want it now
 
 concurrency:
   # Two overlapping runs would both append to the same day's history key, and KV
