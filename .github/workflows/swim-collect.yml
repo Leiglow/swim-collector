@@ -1,0 +1,81 @@
+name: Collect bathing water data
+
+# Reads every live sewage-spill, warning and rainfall feed, works out a verdict
+# for all 941 bathing waters, and posts the finished snapshot to the site.
+#
+# This runs here rather than on Cloudflare because a free Worker gets 10ms of
+# CPU and this job parses ~18,600 outfall records. It takes 20–40 seconds.
+#
+# Times below are UTC, which is what cron uses. In British Summer Time that
+# window reads 06:00–22:59 local; in winter it is 05:00–21:59 local. The upstream
+# feeds refresh every 10 to 60 minutes, so there is nothing to gain from running
+# faster than they publish.
+
+on:
+  schedule:
+    - cron: "0,30 5-21 * * *"     # every half hour through the day
+    - cron: "0 0-4,22-23 * * *"   # hourly overnight, to keep the history continuous
+  workflow_dispatch:               # and a button, for when you want it now
+
+concurrency:
+  # Two overlapping runs would both append to the same day's history key, and KV
+  # has no compare-and-swap, so one would silently overwrite the other.
+  group: swim-collect
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  # Lets this workflow ask GitHub for a short-lived signed token proving which
+  # repository it is. The site verifies that signature instead of holding a
+  # shared password, so there is no secret to store, rotate or leak.
+  id-token: write
+
+jobs:
+  collect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Collect and publish
+        env:
+          # The URLs come from repository secrets rather than being written here,
+          # so this repo can be public without publishing where it posts to.
+          SWIM_INGEST_URL: ${{ secrets.SWIM_INGEST_URL }}
+          # The beach register lives with the website, so there is one copy of it
+          # rather than two drifting apart.
+          SWIM_DATA_BASE: ${{ secrets.SWIM_DATA_BASE }}
+          # One government API refuses requests from GitHub's IP ranges, so those
+          # calls — and only those — are relayed through the site's own domain.
+          SWIM_FETCH_PROXY: ${{ secrets.SWIM_FETCH_PROXY }}
+        run: |
+          # Ask GitHub to vouch for this run. The audience ties the token to the
+          # one endpoint that accepts it, so it is no use anywhere else, and it
+          # expires within minutes. It never leaves this step.
+          SWIM_INGEST_TOKEN=$(curl -sS \
+            -H "Authorization: bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" \
+            "$ACTIONS_ID_TOKEN_REQUEST_URL&audience=swim-ingest" \
+            | python3 -c "import sys,json; print(json.load(sys.stdin)['value'])")
+          export SWIM_INGEST_TOKEN
+          python3 collect_swim.py --publish
+
+      - name: Summarise this run
+        if: success()
+        run: |
+          python3 - <<'PY'
+          import json, os
+          # Only ever report the file this run produced — reporting a checked-in
+          # snapshot would make a failed collection look like a healthy one.
+          if not os.path.exists("live.json"):
+              print("no snapshot was written")
+              raise SystemExit(0)
+          d = json.load(open("live.json"))
+          print("snapshot:", d["at"])
+          print("counts:  ", d.get("counts"))
+          bad = [k for k, v in d.get("feeds", {}).items() if not v.get("ok")]
+          print("feeds down:", ", ".join(bad) if bad else "none")
+          PY
