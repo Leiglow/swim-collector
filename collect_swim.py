@@ -59,6 +59,34 @@ AFFECT_KM = 2.0
 RECENT_HOURS = 48
 HEAVY_RAIN_MM = 10.0            # over 24h, at a beach the EA flags as rain-affected
 RAIN_MAX_AGE_MIN = 150          # rain is re-fetched at most this often; see rainfall()
+# Waterfalls get their own, slower cadence. Open-Meteo counts LOCATIONS against a
+# 10,000/day free allowance, and the 2,557 waterfalls add 859 grid cells to the
+# 540 the beaches need. At the beach cadence that would be 13,400 calls a day —
+# over the limit. Six-hourly keeps the total near 8,600, and costs nothing real:
+# what a waterfall page reports is rain over the last 48 hours, which does not
+# meaningfully change in six.
+FALLS_RAIN_MAX_AGE_MIN = 360
+
+# How much rain over 48 hours means what, for someone deciding whether a
+# waterfall is worth the drive. Deliberately NOT a swimming judgement: the site
+# says nothing about entering the water at a waterfall, because nobody samples,
+# forecasts or signs them.
+FLOW_BANDS = [
+    (30.0, "spate", "In spate",
+     "Very heavy rain has fallen here. The falls will be at their most dramatic "
+     "and at their most dangerous — water levels can rise fast, rocks will be "
+     "slick, and paths beside the water may be undercut."),
+    (15.0, "strong", "Flowing strongly",
+     "Plenty of rain in the last two days. Expect a full, loud waterfall, and "
+     "wet rock underfoot on any path beside it."),
+    (6.0, "good", "Flowing well",
+     "Enough recent rain for a decent flow."),
+    (2.0, "modest", "Modest flow",
+     "A little recent rain. Worth a look, but not at its best."),
+    (-1.0, "low", "Likely low",
+     "Very little rain in the last two days, so expect a thin flow or, on a "
+     "small stream, not much at all."),
+]
 
 NOW = datetime.now(timezone.utc)
 
@@ -817,7 +845,32 @@ def quality_ni(feed, by_country_name):
 # rain
 # ---------------------------------------------------------------------------
 
-def rainfall(sites, feed, previous=None):
+def flow_for(rain, intermittent):
+    """Turn recent rainfall into what a visitor would want to know.
+
+    The safety note gets STRONGER as the flow gets better, which is the opposite
+    of how the beach side of this site reads. That inversion is deliberate and is
+    the whole reason waterfalls are not run through the bathing water logic: rain
+    makes a beach dirtier, but it makes a waterfall both more impressive and more
+    lethal. A coroner's Prevention of Future Deaths report was issued in February
+    2026 over three deaths in Waterfall Country, and the documented mechanism at
+    UK waterfalls is usually slipping on wet rock, not swimming.
+    """
+    if not rain:
+        return None
+    mm = rain.get("h48", 0)
+    for threshold, code, word, note in FLOW_BANDS:
+        if mm >= threshold:
+            out = {"v": code, "word": word, "note": note, "mm48": mm,
+                   "mm24": rain.get("h24", 0), "next24": rain.get("next24", 0)}
+            if intermittent and code in ("low", "modest"):
+                out["note"] = ("This one is recorded as intermittent — it only runs after "
+                               "rain, and there has been little. " + note)
+            return out
+    return None
+
+
+def rainfall(sites, feed, previous=None, max_age_min=None):
     """Rain in the last 24 and 48 hours at every beach.
 
     Rain is the honest proxy for a spill nobody has reported yet — and for the
@@ -837,10 +890,11 @@ def rainfall(sites, feed, previous=None):
     carried forward instead of re-fetched. That keeps us inside the daily
     allowance with room to spare, and the age of the figure is published.
     """
+    limit = max_age_min or RAIN_MAX_AGE_MIN
     if previous and previous.get("at") and previous.get("rain"):
         when = parse_iso(previous["at"])
         age = hours_since(when)
-        if age is not None and 0 <= age * 60 < RAIN_MAX_AGE_MIN:
+        if age is not None and 0 <= age * 60 < limit:
             # Carrying forward must not launder a partial set into a healthy one:
             # apply the same coverage bar as a fresh fetch.
             enough = len(previous["rain"]) >= len(sites) * 0.95
@@ -886,14 +940,19 @@ def rainfall(sites, feed, previous=None):
             for s in cells[key]:
                 got[s["id"]] = value
         if n < len(batches) - 1:
-            time.sleep(1.2)                          # stay under the burst limit
+            # Open-Meteo's limit is 600 LOCATIONS a minute, not 600 requests, so
+            # a batch of 100 must be followed by roughly ten seconds. Sending
+            # them 1.2s apart was asking for 5,000 a minute and quietly losing
+            # whole batches to 429s — which, before the coverage check below, had
+            # wiped out every beach in Wales, Scotland and Ireland in one run.
+            time.sleep(len(batch) / 9.0)
 
     feed.count = len(got)
     feed.at = NOW
     # Partial coverage is a failure of this feed, not a quiet gap.
     feed.ok = failed == 0 and len(got) >= len(sites) * 0.95
     if failed:
-        feed.partial = "%d of %d beaches" % (len(got), len(sites))
+        feed.partial = "%d of %d locations" % (len(got), len(sites))
     return got, NOW
 
 
@@ -1175,6 +1234,60 @@ def verdict(site, ctx):
 
 # ---------------------------------------------------------------------------
 
+def collect_waterfalls(feeds):
+    """The waterfall side: rainfall only, and a flow reading built from it.
+
+    Kept in its own snapshot rather than bolted onto the bathing water one. A
+    beach page has no use for 2,557 waterfalls and a waterfall page has no use
+    for 941 beaches, so each fetches only what it needs.
+    """
+    try:
+        falls = load_static("waterfalls.json")["falls"]
+    except Exception as e:                          # noqa: BLE001
+        print("    no waterfall register available: %s" % str(e)[:90])
+        return None
+
+    f = feeds["Waterfall rainfall"] = Feed("Waterfall rainfall", escalates=False)
+    try:
+        rain, rain_at = rainfall(falls, f, previous_falls(), FALLS_RAIN_MAX_AGE_MIN)
+    except Exception as e:                          # noqa: BLE001
+        f.error = e
+        print("    Waterfall rainfall FAILED %s" % str(e)[:120])
+        return None
+
+    out = {}
+    for w in falls:
+        flow = flow_for(rain.get(w["id"]), w.get("intermittent") == "yes")
+        if flow:
+            out[w["id"]] = flow
+    print("    %-32s %4d waterfalls%s" % ("Waterfall rainfall", len(out),
+          " (" + f.partial + ")" if f.partial else ""))
+    counts = defaultdict(int)
+    for v in out.values():
+        counts[v["v"]] += 1
+    print("    flow:", dict(counts))
+    return {
+        "at": iso(NOW),
+        "rainAt": iso(rain_at) if rain_at else None,
+        "counts": dict(counts),
+        "falls": out,
+    }
+
+
+def previous_falls():
+    url = os.environ.get("SWIM_INGEST_URL", "").replace("/ingest", "/data")
+    if not url:
+        return None
+    try:
+        d = fetch_json(url + ("&" if "?" in url else "?") + "falls=1", tries=1, timeout=20)
+        return {"at": d.get("rainAt") or d.get("at"),
+                "rain": {k: {"h24": v["mm24"], "h48": v["mm48"], "next24": v["next24"]}
+                         for k, v in (d.get("falls") or {}).items()
+                         if isinstance(v, dict) and "mm48" in v}}
+    except Exception:                               # noqa: BLE001
+        return None
+
+
 def previous_snapshot():
     """The last published snapshot, used only to carry rainfall forward.
 
@@ -1367,20 +1480,34 @@ def main():
     }
     body = json.dumps(snapshot, separators=(",", ":"), ensure_ascii=False)
     io.open(os.path.join(OUT, "live.json"), "w", encoding="utf-8").write(body)
+
+    print("Waterfalls")
+    falls_snapshot = collect_waterfalls(feeds)
+    falls_body = None
+    if falls_snapshot:
+        falls_body = json.dumps(falls_snapshot, separators=(",", ":"), ensure_ascii=False)
+        io.open(os.path.join(OUT, "falls.json"), "w", encoding="utf-8").write(falls_body)
+        print("    wrote falls.json %.0f KB (%.0f KB gzipped)"
+              % (len(falls_body.encode()) / 1024.0,
+                 len(gzip.compress(falls_body.encode())) / 1024.0))
     print("wrote live.json %.0f KB (%.0f KB gzipped) in %.0fs"
           % (len(body.encode()) / 1024.0, len(gzip.compress(body.encode())) / 1024.0,
              time.time() - t0))
 
     if "--publish" in sys.argv:
         publish(body)
+        if falls_body:
+            publish(falls_body, kind="falls")
 
 
-def publish(body):
+def publish(body, kind=None):
     url = os.environ.get("SWIM_INGEST_URL")
     token = os.environ.get("SWIM_INGEST_TOKEN")
     if not url or not token:
         print("publish: SWIM_INGEST_URL / SWIM_INGEST_TOKEN not set — skipped")
         return
+    if kind:
+        url += ("&" if "?" in url else "?") + "kind=" + kind
     # Sent uncompressed on purpose: a Worker hands request.text() the raw bytes,
     # so a gzipped body arrives as mojibake and is rejected on every single run.
     last = None
