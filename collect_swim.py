@@ -918,6 +918,21 @@ FORECAST_FEED = {"England": "EA pollution risk forecast",
                  "Ireland": "Ireland restrictions"}
 
 
+def _outfall_row(ctx, key, dist, code):
+    """One nearby outfall, as the page needs it: what it discharges into, how far
+    away, its state, and where it is.
+
+    The position is carried so a beach page can show these on a map — seeing
+    which pipe is discharging and where it sits relative to the water is the
+    thing a list of names cannot convey.
+    """
+    pos = ctx["outfall_pos"].get(key) or []
+    row = [ctx["outfall_name"].get(key) or ctx["outfall_co"].get(key, "Outfall"), dist, code]
+    if len(pos) == 2:
+        row.extend([round(pos[0], 5), round(pos[1], 5)])
+    return row
+
+
 def verdict(site, ctx):
     """Decide what to tell someone standing on this beach, and why.
 
@@ -1055,17 +1070,15 @@ def verdict(site, ctx):
             # monitor would lose the discharge entirely.
             if st["recent"]:
                 recent_list.append((key, dist, st))
-            detail.append([ctx["outfall_name"].get(key) or ctx["outfall_co"].get(key, "Outfall"),
-                           dist, "off"])
+            detail.append(_outfall_row(ctx, key, dist, "off"))
             continue
         resolved += 1
         if st["now"]:
             now_list.append((key, dist, st))
         elif st["recent"]:
             recent_list.append((key, dist, st))
-        detail.append([ctx["outfall_name"].get(key) or ctx["outfall_co"].get(key, "Outfall"),
-                       dist,
-                       "now" if st["now"] else "recent" if st["recent"] else "clear"])
+        detail.append(_outfall_row(ctx, key, dist,
+                                   "now" if st["now"] else "recent" if st["recent"] else "clear"))
 
     if resolved:
         checked.append("%d monitored storm overflow%s within %.0fkm"
@@ -1212,6 +1225,7 @@ def main():
     outfalls = load_static("outfalls.json")
     outfall_co = {k: v[2] for k, v in outfalls.items()}
     outfall_name = {k: v[3] for k, v in outfalls.items() if v[3]}
+    outfall_pos = {k: [v[0], v[1]] for k, v in outfalls.items()}
     # Keyed by country as well as name: "Sandycove" and "Silver Strand" exist in
     # more than one country, and a bare name map hands one country's reading to
     # the other's beach.
@@ -1314,7 +1328,8 @@ def main():
 
     ctx = {"prf": warnings, "incidents": incidents, "sepa": sepa, "roi": roi, "ni": ni,
            "southern": southern, "rain": rain, "spills": spills, "nearby": nearby,
-           "outfall_co": outfall_co, "outfall_name": outfall_name, "feeds": feeds}
+           "outfall_co": outfall_co, "outfall_name": outfall_name,
+           "outfall_pos": outfall_pos, "feeds": feeds}
 
     print("Verdicts")
     out, counts = {}, defaultdict(int)
@@ -1333,7 +1348,7 @@ def main():
             rec["outfalls"] = len(v["near"])
             rec["nearest"] = v["near"][0][1]
         if v["detail"]:
-            rec["of"] = [[n, round(d, 1), c] for n, d, c in v["detail"]]
+            rec["of"] = [[r[0], round(r[1], 1)] + list(r[2:]) for r in v["detail"]]
         n = ni.get(s["id"])
         if n and n.get("indicator"):
             rec["ni"] = n["indicator"]

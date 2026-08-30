@@ -27,6 +27,7 @@ import os
 import ssl
 import sys
 import time
+import unicodedata
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -239,6 +240,10 @@ def sites_england():
             "kind": _kind(type_from_uris(it.get("type"))),
             "district": lit(it.get("district")),
             "rainRisk": bool(it.get("waterQualityImpactedByHeavyRain")),
+            # The regulator's own page for this beach, so every page we publish
+            # can point at the source rather than asking people to take our word.
+            "url": "https://environment.data.gov.uk/bwq/profiles/profile.html?site=%s"
+                   % it["eubwidNotation"],
         })
     return out
 
@@ -262,6 +267,8 @@ def sites_wales():
             "kind": _kind(type_from_uris(it.get("type"))),
             "district": lit(it.get("district")),
             "rainRisk": bool(it.get("waterQualityImpactedByHeavyRain")),
+            "url": "https://environment.data.gov.uk/wales/bathing-waters/profiles/"
+                   "profile.html?site=%s" % it["eubwidNotation"],
         })
     return out
 
@@ -319,6 +326,7 @@ def sites_ni():
             "kind": "Inland" if (p.get("Region") or "") == "Inland" else "Coastal",
             "district": p.get("Region"),
             "rainRisk": False,
+            "url": p.get("Profile__URL") or None,
         })
     return out
 
@@ -351,6 +359,7 @@ def sites_roi():
             "kind": "Coastal",
             "district": b.get("CountyName"),
             "rainRisk": False,
+            "url": b.get("ProfileUrl") or None,
         })
     if dropped:
         print("    ROI: dropped %d sites with no usable position at all" % dropped)
@@ -381,8 +390,49 @@ def _title(s):
     return " ".join(w.capitalize() if w.isupper() and len(w) > 2 else w for w in str(s).split())
 
 
+def add_slugs(sites):
+    """A stable, readable url for every beach.
+
+    These become public page addresses, so they have to be unique and they must
+    not churn: a slug that changes between builds silently breaks every link and
+    every search result pointing at it. Collisions are resolved by appending the
+    district, and only then by a number, so the common case stays clean.
+    """
+    used = {}
+    for s in sites:
+        base = _slug(s["name"]) or "beach"
+        slug = base
+        if slug in used:
+            extra = _slug(s.get("district") or s["country"])
+            slug = "%s-%s" % (base, extra) if extra else base
+        n = 2
+        while slug in used:
+            slug = "%s-%d" % (base, n)
+            n += 1
+        used[slug] = s["id"]
+        s["slug"] = slug
+
+
 def _slug(s):
-    return "".join(ch.lower() if ch.isalnum() else "-" for ch in str(s)).strip("-")[:48]
+    """A clean ASCII url fragment.
+
+    Accents are folded rather than kept: "Trá na mBan, An Spidéal" becomes
+    tra-na-mban-an-spideal, which people can type, paste into a message and read
+    back off a link. Runs of punctuation collapse to a single hyphen so names
+    with commas do not produce doubled ones.
+    """
+    text = unicodedata.normalize("NFKD", str(s))
+    text = "".join(c for c in text if not unicodedata.combining(c))
+    # Apostrophes vanish rather than becoming hyphens: "Anstey's Cove" should
+    # read ansteys-cove, not anstey-s-cove.
+    text = text.replace("'", "").replace("\u2019", "")
+    out = []
+    for ch in text.lower():
+        if ch.isalnum() and ord(ch) < 128:
+            out.append(ch)
+        elif out and out[-1] != "-":
+            out.append("-")
+    return "".join(out).strip("-")[:60].strip("-")
 
 
 # ---------------------------------------------------------------------------
@@ -549,6 +599,7 @@ def main():
     print("    total      %4d sites" % len(sites))
 
     sites.sort(key=lambda s: (s["country"], s["name"]))
+    add_slugs(sites)
     write(os.path.join(OUT, "sites.json"), {
         "built": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
         "sites": sites,
