@@ -680,18 +680,30 @@ def prf(feed, url=None, prefix="E:"):
         before any date parsing or the guard above silently never runs.
     """
     got = {}
+    last_error = None
     for day_offset in (0, 1):
         date = (NOW - timedelta(days=day_offset)).strftime("%Y-%m-%d")
         feed.partial = None if day_offset == 0 else "using yesterday's forecast"
         page_url = (url or S.EA_PRF).format(date=date)
         page_url_used = page_url
         items, guard = [], 0
-        while page_url and guard < 10:
-            d = fetch_json(page_url)
-            res = d.get("result", {})
-            items.extend(res.get("items", []))
-            page_url = res.get("next")
-            guard += 1
+        try:
+            while page_url and guard < 10:
+                d = fetch_json(page_url)
+                res = d.get("result", {})
+                items.extend(res.get("items", []))
+                page_url = res.get("next")
+                guard += 1
+        except Exception as e:                          # noqa: BLE001
+            # The fallback to yesterday only worked while today's document came
+            # back EMPTY. Overnight, before the Environment Agency publishes at
+            # about a quarter to eight, the relay has never stored today's copy
+            # at all and answers 503 — which threw out of this function and took
+            # the fallback with it. England and Wales then went to "can't say"
+            # for the night: 358 bathing waters unchecked at half past one in the
+            # morning, with yesterday's standing forecast sitting in the larder.
+            last_error = e
+            continue
         if not items:
             continue
         best = {}
@@ -724,6 +736,10 @@ def prf(feed, url=None, prefix="E:"):
             feed.at = max((parse_iso(v["at"]) for v in got.values() if v["at"]), default=None)
             note_relay_age(feed, page_url_used)
             break
+    if not got and last_error is not None:
+        # Neither day could be read. That IS a failed feed, and saying so is what
+        # puts the affected beaches at "can't say" rather than quietly clear.
+        raise last_error
     return got
 
 
