@@ -1476,7 +1476,8 @@ def previous_week():
         return None
     try:
         d = fetch_json(url + ("&" if "?" in url else "?") + "week=1", tries=1, timeout=20)
-        return {"seaAt": d.get("seaAt"), "sea": d.get("sea") or {}}
+        return {"seaAt": d.get("seaAt"), "sea": d.get("sea") or {},
+                "days": d.get("days") or [], "cells": d.get("cells") or {}}
     except Exception:                               # noqa: BLE001
         return None
 
@@ -1669,13 +1670,20 @@ def main():
     # twice a day. Published as its own payload because it is keyed by grid cell
     # and every page would otherwise carry all 540 of them to show one.
     prev_week = previous_week()
-    sea_res = run("Sea temperature", lambda f: sea_temperature(sites, f, prev_week),
-                  escalates=False)
-    sea, sea_at = sea_res if sea_res else ({}, None)
-    print("    %-32s %4d cells%s"
-          % ("Sea temperature", len(sea),
-             " (" + feeds["Sea temperature"].partial + ")"
-             if feeds["Sea temperature"].partial else ""))
+    # Only ask the sea if there is a forecast to attach it to. The payload is
+    # published as one object, so a sea reading taken on a run with no forecast
+    # to go with it would be collected, dropped, and asked for again next time.
+    sea, sea_at = {}, None
+    if DAILY or (prev_week and prev_week.get("cells")):
+        sea_res = run("Sea temperature", lambda f: sea_temperature(sites, f, prev_week),
+                      escalates=False)
+        sea, sea_at = sea_res if sea_res else ({}, None)
+        print("    %-32s %4d cells%s"
+              % ("Sea temperature", len(sea),
+                 " (" + feeds["Sea temperature"].partial + ")"
+                 if feeds["Sea temperature"].partial else ""))
+    else:
+        print("    %-32s waiting for the first forecast" % "Sea temperature")
 
     ctx = {"prf": warnings, "incidents": incidents, "sepa": sepa, "roi": roi, "ni": ni,
            "southern": southern, "rain": rain, "spills": spills, "nearby": nearby,
@@ -1732,28 +1740,41 @@ def main():
           % (len(body.encode()) / 1024.0, len(gzip.compress(body.encode())) / 1024.0,
              time.time() - t0))
 
-    # The week ahead, keyed by grid cell. Built only when rainfall was actually
-    # fetched: on a run that carried rain forward, DAILY is empty and the
-    # forecast already in the store is still the right one, so it is left alone
-    # rather than being overwritten with nothing.
+    # The week ahead, keyed by grid cell.
+    #
+    # The two halves arrive on different clocks: the forecast comes back with
+    # rainfall every three hours, the sea twice a day. Whichever half is fresh
+    # this run is combined with whatever the store already holds for the other,
+    # and the whole thing is written back. Publishing only when BOTH were fetched
+    # would have thrown away every sea reading taken on a run that carried
+    # rainfall forward, and then asked for it again on the next one, which is
+    # most runs and several thousand wasted calls a day.
     week_body = None
-    if DAILY:
-        days = []
-        for v in DAILY.values():
-            if len(v["d"]) > len(days):
-                days = v["d"]
+    prev = prev_week or {}
+    days = []
+    for v in DAILY.values():
+        if len(v["d"]) > len(days):
+            days = v["d"]
+    cells = {k: v["w"] for k, v in DAILY.items()} if DAILY else (prev.get("cells") or {})
+    if not days:
+        days = prev.get("days") or []
+    sea_now = sea if sea else (prev.get("sea") or {})
+    sea_stamp = ((sea_at or NOW).strftime("%Y-%m-%dT%H:%M:%SZ") if sea
+                 else prev.get("seaAt"))
+    if cells:
         week = {
             "at": NOW.strftime("%Y-%m-%dT%H:%M:%SZ"),
             "days": days,
             "grid": 0.1,
             "seaGrid": SEA_GRID,
-            "seaAt": (sea_at or NOW).strftime("%Y-%m-%dT%H:%M:%SZ") if sea else None,
-            "sea": sea,
-            "cells": {k: v["w"] for k, v in DAILY.items()},
+            "seaAt": sea_stamp,
+            "sea": sea_now,
+            "cells": cells,
         }
         week_body = json.dumps(week, separators=(",", ":"))
-        print("    %-32s %4d cells, %d days, %d with a sea temperature"
-              % ("Week ahead", len(week["cells"]), len(days), len(sea)))
+        print("    %-32s %4d cells, %d days, %d with a sea temperature%s"
+              % ("Week ahead", len(cells), len(days), len(sea_now),
+                 "" if DAILY else " (forecast carried forward)"))
         print("    wrote week.json %.0f KB (%.0f KB gzipped)"
               % (len(week_body.encode()) / 1024.0,
                  len(gzip.compress(week_body.encode())) / 1024.0))
