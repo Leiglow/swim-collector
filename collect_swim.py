@@ -1729,6 +1729,35 @@ def main():
     for k in ("avoid", "advised", "caution", "unknown", "ok"):
         print("    %-9s %4d" % (k, counts[k]))
 
+    # A small payload for the two things that must not drag the full snapshot
+    # around: the embeddable badge, which sits on somebody else's site, and the
+    # alerts feed. One line per bathing water instead of the whole verdict with
+    # its reasons, checks, gaps, rainfall and outfall list.
+    brief_sites, alerts = {}, []
+    by_id = {s["id"]: s for s in sites}
+    for sid, rec in out.items():
+        site = by_id.get(sid)
+        if not site:
+            continue
+        why = ""
+        for w in (rec.get("why") or []):
+            if w.get("text"):
+                why = w["text"]
+                break
+        brief_sites[sid] = [rec["v"], why[:120]]
+        if rec["v"] in ("avoid", "advised"):
+            alerts.append({
+                "id": sid, "name": site["name"], "slug": site["slug"],
+                "level": rec["v"], "why": why[:220],
+                "where": ", ".join(x for x in (site.get("district"), site["country"]) if x),
+                "country": site["country"],
+            })
+    alerts.sort(key=lambda a: (0 if a["level"] == "avoid" else 1, a["where"], a["name"]))
+    brief_body = json.dumps({"at": iso(NOW), "sites": brief_sites, "alerts": alerts},
+                            separators=(",", ":"), ensure_ascii=False)
+    print("    %-32s %4d sites, %d under a warning (%.0f KB)"
+          % ("Brief", len(brief_sites), len(alerts), len(brief_body.encode()) / 1024.0))
+
     snapshot = {
         "at": iso(NOW),
         "rainAt": iso(rain_at) if rain_at else None,
@@ -1798,6 +1827,7 @@ def main():
             publish(falls_body, kind="falls")
         if week_body:
             publish(week_body, kind="week")
+        publish(brief_body, kind="brief")
 
 
 def publish(body, kind=None):
