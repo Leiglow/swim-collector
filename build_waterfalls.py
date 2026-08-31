@@ -68,6 +68,29 @@ def fetch(url, data=None, tries=3, timeout=200):
     raise RuntimeError(str(last)[:200])
 
 
+def clean_name(raw):
+    """What OpenStreetMap calls a waterfall is not always a name.
+
+    Contributors put all sorts in the name field. A page called "0.3" is not a
+    waterfall anyone is looking for, and a name wrapped in stray quotation marks
+    (\"Upper\" Low Force) reads as a mistake. Anything that survives this is
+    treated as a real name and gets its own page; anything that does not stays
+    on the map as an unnamed fall, which is honest — we know it is there, we do
+    not know what it is called.
+    """
+    t = (raw or "").strip()
+    if not t:
+        return ""
+    # Straight and curly quotes around a word are an editing artefact, not part
+    # of the name.
+    t = t.replace('"', "").replace("\u201c", "").replace("\u201d", "").strip()
+    t = " ".join(t.split())
+    # A "name" with no letters in it is a measurement, a height or a note.
+    if not any(c.isalpha() for c in t):
+        return ""
+    return t
+
+
 def slugify(text):
     t = unicodedata.normalize("NFKD", str(text))
     t = "".join(c for c in t if not unicodedata.combining(c))
@@ -88,33 +111,7 @@ def haversine(a, b, c, d):
     return 2 * r * math.asin(math.sqrt(x))
 
 
-def load_reference():
-    """The bathing water register, used to work out which country a point is in.
-
-    No bounding box can separate Northern Ireland from the Republic — Donegal
-    sits north of much of Ulster — so instead each waterfall takes the country of
-    the nearest designated bathing water. There are 941 of those spread around
-    both islands, including 33 in Northern Ireland and 240 in the Republic, which
-    makes this reliable everywhere except within a few miles of the border.
-    """
-    path = os.path.join(OUT, "sites.json")
-    if not os.path.exists(path):
-        return []
-    sites = json.load(io.open(path, encoding="utf-8"))["sites"]
-    return [(s["lat"], s["lon"], s["country"]) for s in sites]
-
-
-def country_of(lat, lon, reference):
-    if not reference:
-        return "United Kingdom"
-    best, bestd = None, 1e9
-    for rlat, rlon, country in reference:
-        # Squared degrees is enough to rank candidates and far cheaper than a
-        # great-circle distance across 941 sites for 2,557 waterfalls.
-        d = (rlat - lat) ** 2 + ((rlon - lon) * 0.6) ** 2
-        if d < bestd:
-            best, bestd = country, d
-    return best
+from falls_areas import district_of
 
 
 def main():
@@ -132,23 +129,34 @@ def main():
 
     els = json.loads(body.decode("utf-8", "replace")).get("elements", [])
     print("    %d waterfalls tagged" % len(els))
-    reference = load_reference()
-    print("    %d bathing waters loaded as the country reference" % len(reference))
 
     falls, used = [], {}
     unnamed = 0
+    skipped = 0
     for e in els:
         tags = e.get("tags") or {}
         lat = e.get("lat") if e.get("lat") is not None else (e.get("center") or {}).get("lat")
         lon = e.get("lon") if e.get("lon") is not None else (e.get("center") or {}).get("lon")
         if lat is None or lon is None:
             continue
-        name = (tags.get("name") or "").strip()
+        name = clean_name(tags.get("name"))
+
+        # The Overpass search box is a rectangle, and a rectangle that holds all
+        # of Britain and Ireland also holds the top of France. Six waterfalls
+        # near Calais and in Normandy were being published as English, two of
+        # them under their French names. No county means not in the British
+        # Isles, so drop it.
+        district, country = district_of(float(lat), float(lon))
+        if not district:
+            skipped += 1
+            continue
+
         rec = {
             "id": "F:%s%s" % (e.get("type", "n")[0], e.get("id")),
             "lat": round(float(lat), 5),
             "lon": round(float(lon), 5),
-            "country": country_of(float(lat), float(lon), reference),
+            "country": country,
+            "district": district,
         }
         if name:
             rec["name"] = name
@@ -199,6 +207,8 @@ def main():
     for f in falls:
         by_country[f["country"]] += 1
     print("    by country:", dict(by_country))
+    print("    %d areas, %d outside Britain and Ireland dropped"
+          % (len({f["district"] for f in falls}), skipped))
 
     payload = {
         "built": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
