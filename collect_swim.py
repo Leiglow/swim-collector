@@ -972,7 +972,16 @@ AVOID_WORDS = ("advice against bathing", "do not swim", "prohibited",
 
 # "unknown" sits ABOVE "ok": not knowing is a worse answer than knowing it is
 # clear, and must be able to displace a green tick.
-ORDER = {"ok": 0, "unknown": 1, "caution": 2, "avoid": 3}
+# Five levels, and the split between the top two is the point of them. "avoid"
+# is somebody official saying do not go in this water today — a legal
+# prohibition, an open pollution incident, a storm overflow discharging within
+# 2km right now. "advised" is the daily pollution risk forecast: a model's view
+# of today, published as advice against bathing, and routine after heavy rain.
+#
+# They used to share a level, which put a forecast under the same words as a
+# legal ban and made two thirds of the red on this site predictive rather than
+# actual.
+ORDER = {"ok": 0, "unknown": 1, "caution": 2, "advised": 3, "avoid": 4}
 
 AUTHORITY = {"England": "Environment Agency", "Wales": "Natural Resources Wales",
              "Scotland": "SEPA", "Northern Ireland": "DAERA", "Ireland": "EPA Ireland"}
@@ -1022,8 +1031,13 @@ def verdict(site, ctx):
         checked.append("Today's official pollution forecast")
         comment = (p.get("comment") or "").lower()
         if any(w in comment for w in AVOID_WORDS):
-            level = raise_to("avoid")
-            why.append({"t": "warning", "s": AUTHORITY.get(country, "The regulator"),
+            # The daily forecast, not an incident: the Environment Agency and NRW
+            # predict today's water from rainfall and tides and post advice
+            # against bathing when the model says so. Serious, and the reason
+            # this site exists — but it is a forecast, and it sits a step below
+            # a prohibition or sewage actually going in the water.
+            level = raise_to("advised")
+            why.append({"t": "advised", "s": AUTHORITY.get(country, "The regulator"),
                         "text": p.get("comment"), "at": p.get("at")})
         elif p.get("level") == "increased":
             level = raise_to("caution")
@@ -1485,7 +1499,7 @@ def main():
             rec["ni"] = n["indicator"]
             rec["niAt"] = n.get("at")
         out[s["id"]] = rec
-    for k in ("avoid", "caution", "unknown", "ok"):
+    for k in ("avoid", "advised", "caution", "unknown", "ok"):
         print("    %-9s %4d" % (k, counts[k]))
 
     snapshot = {
