@@ -997,6 +997,20 @@ AVOID_WORDS = ("advice against bathing", "do not swim", "prohibited",
 # They used to share a level, which put a forecast under the same words as a
 # legal ban and made two thirds of the red on this site predictive rather than
 # actual.
+# Running this by hand writes the snapshot next to the site so it can be looked
+# at. The names start with a dot and are gitignored: the undotted names are real,
+# committed files that say the old build-time snapshots are gone, and a local run
+# must never quietly put a live-looking snapshot back at a public address.
+# How recent a published snapshot has to be for a run to stand down. The
+# workflow asks every few minutes because GitHub delivers only a fraction of
+# what it is asked for; this is what stops the ones that do arrive from
+# repeating work that is already done.
+FRESH_ENOUGH_MINUTES = 20
+
+LOCAL_SNAPSHOT = ".snapshot-local.json"
+LOCAL_FALLS = ".falls-local.json"
+
+
 ORDER = {"ok": 0, "unknown": 1, "caution": 2, "advised": 3, "avoid": 4}
 
 AUTHORITY = {"England": "Environment Agency", "Wales": "Natural Resources Wales",
@@ -1379,8 +1393,40 @@ def load_static(name):
     return fetch_json(base.rstrip("/") + "/" + name, timeout=60)
 
 
+def already_fresh(minutes):
+    """Has somebody already published a snapshot recently enough?
+
+    GitHub drops most scheduled events, so the workflow asks for a run every few
+    minutes and accepts that only some arrive. That only works if the runs that
+    are not needed are cheap: this checks the published snapshot first and lets
+    the job finish in seconds rather than spending ninety on work already done.
+
+    Anything it cannot determine — no address, no answer, an unreadable time —
+    means carry on and collect. A missed run is worse than a wasted one.
+    """
+    base = os.environ.get("SWIM_DATA_BASE")
+    if not base or "--force" in sys.argv:
+        return False
+    try:
+        d = fetch_json(base.rstrip("/") + "/data", timeout=30)
+        at = parse_iso(d.get("at"))
+        if not at:
+            return False
+        age = (NOW - at).total_seconds() / 60.0
+        if age < minutes:
+            print("published snapshot is %.0f minutes old — nothing to do" % age)
+            return True
+        print("published snapshot is %.0f minutes old — collecting" % age)
+    except Exception as e:                              # noqa: BLE001
+        print("could not read the published snapshot (%s) — collecting" %
+              str(e)[:80])
+    return False
+
+
 def main():
     t0 = time.time()
+    if already_fresh(FRESH_ENOUGH_MINUTES):
+        return
     sites = load_static("sites.json")["sites"]
     nearby = load_static("nearby.json")
     outfalls = load_static("outfalls.json")
@@ -1527,14 +1573,14 @@ def main():
         "sites": out,
     }
     body = json.dumps(snapshot, separators=(",", ":"), ensure_ascii=False)
-    io.open(os.path.join(OUT, "live.json"), "w", encoding="utf-8").write(body)
+    io.open(os.path.join(OUT, LOCAL_SNAPSHOT), "w", encoding="utf-8").write(body)
 
     print("Waterfalls")
     falls_snapshot = collect_waterfalls(feeds)
     falls_body = None
     if falls_snapshot:
         falls_body = json.dumps(falls_snapshot, separators=(",", ":"), ensure_ascii=False)
-        io.open(os.path.join(OUT, "falls.json"), "w", encoding="utf-8").write(falls_body)
+        io.open(os.path.join(OUT, LOCAL_FALLS), "w", encoding="utf-8").write(falls_body)
         print("    wrote falls.json %.0f KB (%.0f KB gzipped)"
               % (len(falls_body.encode()) / 1024.0,
                  len(gzip.compress(falls_body.encode())) / 1024.0))

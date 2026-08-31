@@ -13,13 +13,16 @@ name: Collect bathing water data
 
 on:
   schedule:
-    # GitHub treats scheduled workflows as best-effort and drops them under load,
-    # and the load is heaviest on the hour and the half hour. Asking on odd
-    # minutes, four times an hour, is what turns a two-hour gap into a half-hour
-    # one — the runs themselves take about 90 seconds and this repo is public,
-    # so the extra asking costs nothing.
-    - cron: "7,22,37,52 5-21 * * *"   # through the day
-    - cron: "17,47 0-4,22-23 * * *"   # overnight, to keep the history continuous
+    # GitHub treats scheduled workflows as best effort and drops most of them.
+    # Asking twice an hour produced a run every two to five hours; moving off the
+    # busy minutes and asking four times an hour barely helped — one run in five
+    # hours overnight. So ask often and let the ones that arrive decide.
+    #
+    # That is only reasonable because a run that is not needed is cheap: the
+    # collector reads the published snapshot first and finishes in seconds if it
+    # is under twenty minutes old. Only a run that has real work to do spends the
+    # ninety seconds. This repo is public, so the minutes are unmetered.
+    - cron: "*/5 * * * *"
   workflow_dispatch:                   # and a button, for when you want it now
 
 concurrency:
@@ -66,19 +69,28 @@ jobs:
             "$ACTIONS_ID_TOKEN_REQUEST_URL&audience=swim-ingest" \
             | python3 -c "import sys,json; print(json.load(sys.stdin)['value'])")
           export SWIM_INGEST_TOKEN
-          python3 collect_swim.py --publish
+          # Pressing Run means run: a hand-started job skips the freshness
+          # check that lets the frequent scheduled ones stand down.
+          FORCE=""
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then FORCE="--force"; fi
+          python3 collect_swim.py --publish $FORCE
 
+      # A run that stood down writes no snapshot, so the summary below would
+      # report the previous one as if it were fresh. Skip it in that case.
       - name: Summarise this run
-        if: success()
+        if: success() && hashFiles('.snapshot-local.json') != ''
         run: |
           python3 - <<'PY'
           import json, os
           # Only ever report the file this run produced — reporting a checked-in
           # snapshot would make a failed collection look like a healthy one.
-          if not os.path.exists("live.json"):
-              print("no snapshot was written")
+          # The collector writes its local copy under a dotted name so a run
+          # here can never leave a live-looking snapshot at a public address.
+          snap = ".snapshot-local.json"
+          if not os.path.exists(snap):
+              print("no snapshot was written — this run stood down")
               raise SystemExit(0)
-          d = json.load(open("live.json"))
+          d = json.load(open(snap))
           print("snapshot:", d["at"])
           print("counts:  ", d.get("counts"))
           bad = [k for k, v in d.get("feeds", {}).items() if not v.get("ok")]
