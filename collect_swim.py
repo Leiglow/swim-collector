@@ -1004,6 +1004,11 @@ def rainfall(sites, feed, previous=None, max_age_min=None):
     allowance with room to spare, and the age of the figure is published.
     """
     limit = max_age_min or RAIN_MAX_AGE_MIN
+    # --fresh-rain skips the carry-forward. Rain is only re-fetched every three
+    # hours, so after a change to what is asked for there is otherwise nothing to
+    # see for hours, and no way to check the change worked before it is live.
+    if "--fresh-rain" in sys.argv:
+        previous = None
     if previous and previous.get("at") and previous.get("rain"):
         when = parse_iso(previous["at"])
         age = hours_since(when)
