@@ -992,8 +992,16 @@ def sea_temperature(sites, feed, previous=None):
                 rows.append([None if b is None else round(b, 1),
                              None if a is None else round(a, 1)])
             # All null means this cell is not at sea. Publish nothing for it.
+            #
+            # The coordinates the model actually used travel with the reading.
+            # Dropping a distant cell here is not enough on its own: the page
+            # looks for the nearest cell it was given, so a beach whose own cell
+            # was dropped simply borrows a neighbour's, which is how Gyllyngvase
+            # kept showing water from twenty kilometres out after the first
+            # attempt at this. The page has to be able to measure for itself.
             if rows and any(r[0] is not None or r[1] is not None for r in rows):
-                got["%d,%d" % key] = rows
+                got["%d,%d" % key] = {"at": [round(used_lat, 4), round(used_lon, 4)],
+                                      "t": rows}
         if n < len(batches) - 1:
             time.sleep(len(batch) / 9.0)
 
