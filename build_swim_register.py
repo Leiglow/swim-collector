@@ -232,7 +232,7 @@ def sites_england():
         ca = it.get("latestComplianceAssessment") or {}
         out.append({
             "id": "E:" + str(it["eubwidNotation"]),
-            "name": lit(it.get("name")) or str(it["eubwidNotation"]),
+            "name": tidy_name(lit(it.get("name")) or str(it["eubwidNotation"])),
             "country": "England",
             "lat": ll[0], "lon": ll[1],
             "cls": _tidy_class(lit(ca.get("complianceClassification"))),
@@ -260,7 +260,7 @@ def sites_wales():
         ca = it.get("latestComplianceAssessment") or {}
         out.append({
             "id": "W:" + str(it["eubwidNotation"]),
-            "name": lit(it.get("name")) or str(it["eubwidNotation"]),
+            "name": tidy_name(lit(it.get("name")) or str(it["eubwidNotation"])),
             "country": "Wales",
             "lat": ll[0], "lon": ll[1],
             "cls": _tidy_class(lit(ca.get("complianceClassification"))),
@@ -272,6 +272,54 @@ def sites_wales():
                    "profile.html?site=%s" % it["eubwidNotation"],
         })
     return out
+
+
+def class_history(sites):
+    """The last few years of classification for each English and Welsh site.
+
+    A single grade says "Poor" and stops. Poor for the fourth year running and
+    Poor after three years of Good are different situations, and the beach page
+    could not tell them apart. The registers only ever hand over the latest
+    assessment, so the history has to be asked for separately, one year at a
+    time.
+
+    England and Wales only. Scotland's feed carries a single current class,
+    Northern Ireland has no annual classification at all, and the Republic's
+    comes from a different body in a different shape. Rather than half-fill the
+    trend and let it look complete, the page shows it only where there is a real
+    series behind it.
+    """
+    hist = defaultdict(dict)
+    this_year = int(time.strftime("%Y"))
+    for back in range(1, S.CLASS_YEARS + 1):
+        year = this_year - back
+        for prefix, url in (("E:", S.EA_CLASS_YEAR), ("W:", S.NRW_CLASS_YEAR)):
+            try:
+                d = fetch_json(url.format(year=year), tries=2, timeout=90)
+            except Exception as e:                  # noqa: BLE001
+                print("    %s %d classifications unavailable: %s"
+                      % (prefix.rstrip(":"), year, str(e)[:60]))
+                continue
+            for it in (d.get("result") or {}).get("items", []):
+                bw = it.get("bwq_bathingWater") or {}
+                eub = bw.get("eubwidNotation")
+                cc = it.get("complianceClassification") or {}
+                name = lit(cc.get("name"))
+                if eub and name:
+                    hist[prefix + str(eub)][year] = _tidy_class(name)
+
+    got = 0
+    for s in sites:
+        rows = hist.get(s["id"])
+        if not rows:
+            continue
+        # Newest first, and only where there is more than one year to compare.
+        series = [[y, rows[y]] for y in sorted(rows, reverse=True)]
+        if len(series) > 1:
+            s["clsHist"] = series
+            got += 1
+    print("    %d sites with a classification history" % got)
+    return got
 
 
 def sites_scotland():
@@ -288,7 +336,7 @@ def sites_scotland():
         name = p.get("description") or "Unnamed"
         out.append({
             "id": "S:" + _slug(name),
-            "name": name,
+            "name": tidy_name(name),
             "country": "Scotland",
             "lat": ll[0], "lon": ll[1],
             "cls": _tidy_class(p.get("class_description")),
@@ -316,7 +364,7 @@ def sites_ni():
         out.append({
             "id": "N:" + str(p.get("Unique_Site_ID_Code") or _slug(name)),
             # DAERA shouts its site names in caps; the page needs them readable.
-            "name": _title(name),
+            "name": tidy_name(_title(name)),
             "country": "Northern Ireland",
             "lat": ll[0], "lon": ll[1],
             # NOTE: water_quality_indicator is the CURRENT per-sample reading, not
@@ -352,7 +400,7 @@ def sites_roi():
             continue
         out.append({
             "id": "I:" + str(b.get("Code") or b.get("LocationId")),
-            "name": b.get("Name") or "Unnamed",
+            "name": tidy_name(b.get("Name") or "Unnamed"),
             "country": "Ireland",
             "lat": ll[0], "lon": ll[1],
             "cls": _tidy_class(b.get("AnnualClassificationName")),
@@ -389,6 +437,18 @@ def _tidy_class(c):
 
 def _title(s):
     return " ".join(w.capitalize() if w.isupper() and len(w) > 2 else w for w in str(s).split())
+
+
+def tidy_name(s):
+    """Fix the punctuation the registers are inconsistent about.
+
+    Five English bathing waters arrive with a backtick where an apostrophe
+    belongs: Norman`s Bay, Mother Ivey`s Bay, St Margaret`s Bay. Sixteen others
+    in the same register use a real apostrophe, so this is the source being
+    untidy rather than a name anyone chose. The slug is unaffected, because
+    both characters slugify away identically, so no URL changes.
+    """
+    return str(s).replace("`", "\u2019").strip()
 
 
 # Which part of the country a place is in, for the filters on the site.
@@ -645,6 +705,12 @@ def main():
     sites.sort(key=lambda s: (s["country"], s["name"]))
     add_regions(sites)
     add_slugs(sites)
+    if not quick:
+        print("Classification history")
+        try:
+            class_history(sites)
+        except Exception as e:                      # noqa: BLE001
+            print("    FAILED: %s" % str(e)[:100])
     write(os.path.join(OUT, "sites.json"), {
         "built": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
         "sites": sites,

@@ -30,6 +30,20 @@ NRW_SITES = "https://environment.data.gov.uk/wales/bathing-waters/doc/bathing-wa
 # Results live under result.primaryTopic.observation[], not result.items[].
 NRW_CLASS = "https://environment.data.gov.uk/wales/bathing-waters/data/bathing-water-quality/compliance-rBWD/slice/year/{year}.json"
 
+# Past classifications, for the trend on a beach page. The registers give only
+# the LATEST assessment, and a single letter grade cannot tell you whether a
+# place is getting better or worse — which is the question a rating four summers
+# wide is actually able to answer.
+#
+# Note the parameter: sampleYear=2024 returns a 500 and year=2024 a 400. The
+# nested form is the one that works.
+EA_CLASS_YEAR = ("https://environment.data.gov.uk/doc/bathing-water-quality/"
+                 "compliance-rBWD.json?sampleYear.ordinalYear={year}&_pageSize=2000")
+NRW_CLASS_YEAR = ("https://environment.data.gov.uk/wales/bathing-waters/doc/"
+                  "bathing-water-quality/compliance-rBWD.json"
+                  "?sampleYear.ordinalYear={year}&_pageSize=1000")
+CLASS_YEARS = 5
+
 # Scotland. Native projection is EPSG:27700, so outSR=4326 is required.
 SEPA_SITES = ("https://map.sepa.org.uk/server/rest/services/Open/Environmental_Monitoring"
               "/MapServer/1/query?where=1%3D1&outFields=*&outSR=4326&f=geojson")

@@ -827,8 +827,8 @@ def restrictions_roi(feed):
     """Statutory bathing restrictions in the Republic. These are legal notices,
     not model output, and are the strongest signal anywhere in this system.
 
-    Ireland has no storm overflow monitoring at all — no EDM programme exists —
-    so for Irish beaches this and the sample results are the whole picture."""
+    The Republic publishes no storm overflow data at all, so for these beaches this
+    and the sample results are the whole picture."""
     d = fetch_json(S.ROI_RESTRICTIONS)
     rows = d if isinstance(d, list) else (d.get("value") or d.get("items") or d.get("data") or [])
     got = {}
@@ -1363,9 +1363,17 @@ def verdict(site, ctx):
         gaps.append("%s's live feed is down, so overflows near here could not be checked"
                     % ", ".join(sorted(unknown_co)))
 
-    if country in ("Ireland", "Northern Ireland"):
-        gaps.append("Nowhere in Ireland monitors storm overflows, so sewage discharges "
-                    "cannot be checked here at all")
+    # Not the same gap on both sides of the border, and it stopped being the same
+    # in May 2026. NI Water now has 466 event duration monitors covering 31 of the
+    # 33 designated bathing waters, but publishes a yearly summary rather than live
+    # status, so there is still nothing here that can say "discharging now". The
+    # Republic publishes nothing at all.
+    if country == "Northern Ireland":
+        gaps.append("NI Water monitors its storm overflows but publishes only a yearly "
+                    "summary, so whether one is discharging now cannot be checked")
+    elif country == "Ireland":
+        gaps.append("No storm overflow data is published in the Republic, so sewage "
+                    "discharges cannot be checked here at all")
 
     # ---- 3. rain ------------------------------------------------------------
     rain = ctx["rain"].get(sid) or {}
