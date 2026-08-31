@@ -58,7 +58,19 @@ CTX = ssl.create_default_context()
 AFFECT_KM = 2.0
 RECENT_HOURS = 48
 HEAVY_RAIN_MM = 10.0            # over 24h, at a beach the EA flags as rain-affected
-RAIN_MAX_AGE_MIN = 150          # rain is re-fetched at most this often; see rainfall()
+RAIN_MAX_AGE_MIN = 180          # rain is re-fetched at most this often; see rainfall()
+# Was 150. Slowed to make room in the Open-Meteo allowance for sea temperature
+# without going near the ceiling: 540 cells every three hours is 4,320 calls a
+# day rather than 5,184. What the page reports is rain over the last 24 and 48
+# hours, which does not meaningfully move in half an hour.
+
+# Sea temperature, on its own grid and its own clock. It is a far smoother field
+# than rainfall — the sea does not change temperature between two beaches twelve
+# miles apart — so a 0.2 degree grid is honest and costs 322 cells rather than
+# 503. Twice a day is plenty for a daily figure.
+SEA_GRID = 0.2
+SEA_MAX_AGE_MIN = 720
+SEA_KINDS = ("Coastal", "Estuary")
 # Waterfalls get their own, slower cadence. Open-Meteo counts LOCATIONS against a
 # 10,000/day free allowance, and the 2,557 waterfalls add 859 grid cells to the
 # 540 the beaches need. At the beach cadence that would be 13,400 calls a day —
@@ -893,6 +905,84 @@ def flow_for(rain, intermittent):
     return None
 
 
+# Filled in by rainfall() as a side effect, and drained by week_ahead(). The
+# forecast arrives in the same response as the rain totals, so taking it here
+# costs nothing; the alternative was a second call per location and a second
+# bite out of the daily allowance.
+DAILY = {}
+CELL_POINT = {}
+
+
+def cell_key(key):
+    """The grid cell name shared by the collector and the page."""
+    return "%d,%d" % key
+
+
+def sea_temperature(sites, feed, previous=None):
+    """Sea surface temperature for the coastal beaches, from the marine service.
+
+    Only for beaches actually on the sea. Ask the marine API about a river or a
+    reservoir and every value comes back null, and a null is published as
+    nothing rather than filled in with the nearest coast: a lake in Cumbria is
+    not the Irish Sea, and saying it is 17 degrees would be inventing a figure.
+    """
+    if previous and previous.get("seaAt"):
+        when = parse_iso(previous["seaAt"])
+        age = hours_since(when)
+        if age is not None and 0 <= age * 60 < SEA_MAX_AGE_MIN and previous.get("sea"):
+            feed.ok, feed.count, feed.at = True, len(previous["sea"]), when
+            feed.partial = "carried forward, %d minutes old" % int(age * 60)
+            return previous["sea"], when
+
+    cells = {}
+    for s in sites:
+        if (s.get("kind") or "") not in SEA_KINDS:
+            continue
+        cells.setdefault((round(s["lat"] / SEA_GRID), round(s["lon"] / SEA_GRID)), []).append(s)
+    keys = list(cells.keys())
+    batches = [keys[i:i + S.OPEN_METEO_BATCH]
+               for i in range(0, len(keys), S.OPEN_METEO_BATCH)]
+
+    got, failed = {}, 0
+    for n, batch in enumerate(batches):
+        pts = [cells[k][0] for k in batch]
+        url = S.OPEN_METEO_MARINE.format(
+            lats=",".join("%.4f" % p["lat"] for p in pts),
+            lons=",".join("%.4f" % p["lon"] for p in pts))
+        try:
+            d = fetch_json(url, timeout=60, tries=3)
+        except Exception as e:                      # noqa: BLE001
+            feed.error = e
+            failed += len(batch)
+            continue
+        blocks = d if isinstance(d, list) else [d]
+        for key, blk in zip(batch, blocks):
+            day = (blk or {}).get("daily") or {}
+            dates = day.get("time") or []
+            hi = day.get("sea_surface_temperature_max") or []
+            lo = day.get("sea_surface_temperature_min") or []
+            rows, today = [], NOW.strftime("%Y-%m-%d")
+            for i, dt in enumerate(dates):
+                if dt < today:
+                    continue
+                a = hi[i] if i < len(hi) else None
+                b = lo[i] if i < len(lo) else None
+                rows.append([None if b is None else round(b, 1),
+                             None if a is None else round(a, 1)])
+            # All null means this cell is not at sea. Publish nothing for it.
+            if rows and any(r[0] is not None or r[1] is not None for r in rows):
+                got["%d,%d" % key] = rows
+        if n < len(batches) - 1:
+            time.sleep(len(batch) / 9.0)
+
+    feed.count = len(got)
+    feed.at = NOW
+    feed.ok = failed == 0 and bool(got)
+    if failed:
+        feed.partial = "%d of %d cells" % (len(got), len(keys))
+    return got, NOW
+
+
 def rainfall(sites, feed, previous=None, max_age_min=None):
     """Rain in the last 24 and 48 hours at every beach.
 
@@ -936,6 +1026,10 @@ def rainfall(sites, feed, previous=None, max_age_min=None):
     got, failed = {}, 0
     for n, batch in enumerate(batches):
         pts = [cells[k][0] for k in batch]
+        # Remember which real coordinate stood for each cell, so the forecast
+        # captured below can be looked up by the same cell key the page computes.
+        for k, p in zip(batch, pts):
+            CELL_POINT[k] = (p["lat"], p["lon"])
         url = S.OPEN_METEO.format(
             lats=",".join("%.4f" % p["lat"] for p in pts),
             lons=",".join("%.4f" % p["lon"] for p in pts))
@@ -962,6 +1056,27 @@ def rainfall(sites, feed, previous=None, max_age_min=None):
                      "next24": round(sum(x or 0 for x in precip[idx:idx + 24]), 1)}
             for s in cells[key]:
                 got[s["id"]] = value
+
+            # The week ahead, from the same response. Kept per cell rather than
+            # per site: 941 beaches share 540 cells, and two beaches four miles
+            # apart do not get different weather.
+            day = (blk or {}).get("daily") or {}
+            dates = day.get("time") or []
+            if dates:
+                today = NOW.strftime("%Y-%m-%d")
+                rows = []
+                for i, d in enumerate(dates):
+                    if d < today:
+                        continue                # past_days=2 is for the rain totals
+                    def at(name, i=i, day=day):
+                        v = (day.get(name) or [None] * len(dates))[i]
+                        return None if v is None else round(v, 1)
+                    rows.append([day.get("weather_code", [None])[i],
+                                 at("temperature_2m_min"), at("temperature_2m_max"),
+                                 at("precipitation_sum"), at("wind_speed_10m_max")])
+                if rows:
+                    DAILY[cell_key(key)] = {"d": [d for d in dates if d >= today],
+                                            "w": rows}
         if n < len(batches) - 1:
             # Open-Meteo's limit is 600 LOCATIONS a minute, not 600 requests, so
             # a batch of 100 must be followed by roughly ten seconds. Sending
@@ -1350,6 +1465,22 @@ def previous_falls():
         return None
 
 
+def previous_week():
+    """The last published forecast, so sea temperature can be carried forward.
+
+    The forecast is rebuilt whenever rainfall is actually fetched, but the sea
+    is only asked twice a day, so most runs need the previous answer.
+    """
+    url = os.environ.get("SWIM_INGEST_URL", "").replace("/ingest", "/data")
+    if not url:
+        return None
+    try:
+        d = fetch_json(url + ("&" if "?" in url else "?") + "week=1", tries=1, timeout=20)
+        return {"seaAt": d.get("seaAt"), "sea": d.get("sea") or {}}
+    except Exception:                               # noqa: BLE001
+        return None
+
+
 def previous_snapshot():
     """The last published snapshot, used only to carry rainfall forward.
 
@@ -1533,6 +1664,19 @@ def main():
           % ("Rainfall", len(rain),
              " (" + feeds["Rainfall"].partial + ")" if feeds["Rainfall"].partial else ""))
 
+    # The week ahead. The forecast itself came back with the rain above and cost
+    # nothing extra; the sea is a separate service and a separate grid, asked
+    # twice a day. Published as its own payload because it is keyed by grid cell
+    # and every page would otherwise carry all 540 of them to show one.
+    prev_week = previous_week()
+    sea_res = run("Sea temperature", lambda f: sea_temperature(sites, f, prev_week),
+                  escalates=False)
+    sea, sea_at = sea_res if sea_res else ({}, None)
+    print("    %-32s %4d cells%s"
+          % ("Sea temperature", len(sea),
+             " (" + feeds["Sea temperature"].partial + ")"
+             if feeds["Sea temperature"].partial else ""))
+
     ctx = {"prf": warnings, "incidents": incidents, "sepa": sepa, "roi": roi, "ni": ni,
            "southern": southern, "rain": rain, "spills": spills, "nearby": nearby,
            "outfall_co": outfall_co, "outfall_name": outfall_name,
@@ -1588,10 +1732,38 @@ def main():
           % (len(body.encode()) / 1024.0, len(gzip.compress(body.encode())) / 1024.0,
              time.time() - t0))
 
+    # The week ahead, keyed by grid cell. Built only when rainfall was actually
+    # fetched: on a run that carried rain forward, DAILY is empty and the
+    # forecast already in the store is still the right one, so it is left alone
+    # rather than being overwritten with nothing.
+    week_body = None
+    if DAILY:
+        days = []
+        for v in DAILY.values():
+            if len(v["d"]) > len(days):
+                days = v["d"]
+        week = {
+            "at": NOW.strftime("%Y-%m-%dT%H:%M:%SZ"),
+            "days": days,
+            "grid": 0.1,
+            "seaGrid": SEA_GRID,
+            "seaAt": (sea_at or NOW).strftime("%Y-%m-%dT%H:%M:%SZ") if sea else None,
+            "sea": sea,
+            "cells": {k: v["w"] for k, v in DAILY.items()},
+        }
+        week_body = json.dumps(week, separators=(",", ":"))
+        print("    %-32s %4d cells, %d days, %d with a sea temperature"
+              % ("Week ahead", len(week["cells"]), len(days), len(sea)))
+        print("    wrote week.json %.0f KB (%.0f KB gzipped)"
+              % (len(week_body.encode()) / 1024.0,
+                 len(gzip.compress(week_body.encode())) / 1024.0))
+
     if "--publish" in sys.argv:
         publish(body)
         if falls_body:
             publish(falls_body, kind="falls")
+        if week_body:
+            publish(week_body, kind="week")
 
 
 def publish(body, kind=None):

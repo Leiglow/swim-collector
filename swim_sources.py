@@ -150,8 +150,23 @@ SW_SPILLING = "OF"          # OF = Overflowing, RO = Recent Overflow, NO = none,
 # coordinate, so callers must branch on that.
 # forecast_days=2, not 1: with a single day the "next 24 hours" figure is really
 # "the rest of today", and shrinks to nothing by the evening.
+# forecast_days=7 and the daily block ride along on the call that was already
+# being made for rainfall, so the week ahead costs NOTHING extra. Open-Meteo
+# weights a request by locations, and only counts extra when a single location
+# asks for more than 10 variables or more than two weeks: this is six variables
+# over nine days, so it stays one call per location exactly as before.
 OPEN_METEO = ("https://api.open-meteo.com/v1/forecast?latitude={lats}&longitude={lons}"
-              "&hourly=precipitation&past_days=2&forecast_days=2&timezone=GMT")
+              "&hourly=precipitation"
+              "&daily=weather_code,temperature_2m_max,temperature_2m_min,"
+              "precipitation_sum,wind_speed_10m_max"
+              "&past_days=2&forecast_days=7&timezone=GMT")
 OPEN_METEO_BATCH = 100
+
+# Sea temperature comes from a different service. It only answers for points at
+# sea: ask it about a river or a lake and every value comes back null, which is
+# the right answer and is shown as nothing rather than guessed at.
+OPEN_METEO_MARINE = ("https://marine-api.open-meteo.com/v1/marine?latitude={lats}"
+                     "&longitude={lons}&daily=sea_surface_temperature_max,"
+                     "sea_surface_temperature_min&forecast_days=7&timezone=GMT")
 
 USER_AGENT = "swim-collector/1.0 (personal bathing water tool; open data)"
