@@ -934,6 +934,11 @@ def sea_temperature(sites, feed, previous=None):
     nothing rather than filled in with the nearest coast: a lake in Cumbria is
     not the Irish Sea, and saying it is 17 degrees would be inventing a figure.
     """
+    # --fresh-rain means fetch, not carry forward, and the sea is on a twelve
+    # hour cycle: without this a change to how the sea is read takes half a day
+    # to appear, which is no way to check it worked.
+    if "--fresh-rain" in sys.argv:
+        previous = None
     if previous and previous.get("seaAt"):
         when = parse_iso(previous["seaAt"])
         age = hours_since(when)
