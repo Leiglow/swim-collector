@@ -1,0 +1,29 @@
+{
+  // The Worker that asks GitHub to run the collector.
+  //
+  // GitHub treats `schedule:` in Actions as best effort and drops most of them:
+  // asking four times an hour produced roughly one run every five hours, while
+  // every run that did fire succeeded. Cloudflare's cron triggers are reliable
+  // and `workflow_dispatch` is immediate, so the reliable half pokes the other.
+  //
+  // Declaring the schedule here rather than clicking it into the dashboard means
+  // it is version-controlled and cannot drift.
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "swim-collector-cron",
+  "main": "cron/index.js",
+  "compatibility_date": "2026-08-01",
+  "triggers": {
+    // Every fifteen minutes. The Worker checks the published snapshot's age
+    // first and only asks for a run if it is already older than 25 minutes, so
+    // this costs four cheap invocations an hour and dispatches about two.
+    "crons": ["*/15 * * * *"]
+  },
+  "observability": { "enabled": true },
+  "vars": {
+    // Set in the dashboard, not here: this repository is public.
+    // SNAPSHOT_URL — the site's /swim/data address.
+  }
+  // SECRET, set in the dashboard and never in this file:
+  // GITHUB_TOKEN — a fine-grained token scoped to this repository alone, with
+  // Actions: read and write, and nothing else.
+}
