@@ -71,6 +71,14 @@ RAIN_MAX_AGE_MIN = 180          # rain is re-fetched at most this often; see rai
 SEA_GRID = 0.2
 SEA_MAX_AGE_MIN = 720
 SEA_KINDS = ("Coastal", "Estuary")
+# The marine model only has cells where there is sea, so a request for a beach
+# snaps to the nearest wet one — and it does not say it has done so unless you
+# compare the coordinates it echoes back. Measured across all 322 cells this
+# site asks about: median 4.7km, but 22% land more than 10km away and the worst
+# is 22.8km. Instow, seventeen kilometres up the Taw estuary, was being handed
+# Croyde Bay's open water. Beyond this distance the answer is about somewhere
+# else and is thrown away rather than displayed.
+SEA_MAX_SNAP_KM = 12.0
 # Waterfalls get their own, slower cadence. Open-Meteo counts LOCATIONS against a
 # 10,000/day free allowance, and the 2,557 waterfalls add 859 grid cells to the
 # 540 the beaches need. At the beach cadence that would be 13,400 calls a day —
@@ -943,7 +951,7 @@ def sea_temperature(sites, feed, previous=None):
     batches = [keys[i:i + S.OPEN_METEO_BATCH]
                for i in range(0, len(keys), S.OPEN_METEO_BATCH)]
 
-    got, failed = {}, 0
+    got, failed, snapped = {}, 0, 0
     for n, batch in enumerate(batches):
         pts = [cells[k][0] for k in batch]
         url = S.OPEN_METEO_MARINE.format(
@@ -956,8 +964,17 @@ def sea_temperature(sites, feed, previous=None):
             failed += len(batch)
             continue
         blocks = d if isinstance(d, list) else [d]
-        for key, blk in zip(batch, blocks):
+        for key, blk, asked in zip(batch, blocks, pts):
             day = (blk or {}).get("daily") or {}
+            # How far the model moved the question before answering it.
+            used_lat, used_lon = (blk or {}).get("latitude"), (blk or {}).get("longitude")
+            if used_lat is None or used_lon is None:
+                snapped += 1
+                continue
+            away = haversine(asked["lat"], asked["lon"], used_lat, used_lon)
+            if away > SEA_MAX_SNAP_KM:
+                snapped += 1
+                continue
             dates = day.get("time") or []
             hi = day.get("sea_surface_temperature_max") or []
             lo = day.get("sea_surface_temperature_min") or []
@@ -980,6 +997,9 @@ def sea_temperature(sites, feed, previous=None):
     feed.ok = failed == 0 and bool(got)
     if failed:
         feed.partial = "%d of %d cells" % (len(got), len(keys))
+    if snapped:
+        print("    %-32s %4d cells dropped: nearest sea cell over %.0fkm away"
+              % ("", snapped, SEA_MAX_SNAP_KM))
     return got, NOW
 
 
