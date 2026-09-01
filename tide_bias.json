@@ -1,0 +1,349 @@
+{
+ "built": "2026-09-01T08:48:55Z",
+ "source": "Environment Agency tide gauges, Open Government Licence v3.0",
+ "note": "bias = mean(modelled turn - measured turn); negative means the model turns before the water does, which it does everywhere. add = minutes to ADD to a modelled turn to match the gauge, which is the opposite sign. Use add.",
+ "gauges": [
+  {
+   "name": "Aberdeen",
+   "lat": 57.1441,
+   "lon": -2.0801,
+   "bias": -28.5,
+   "spread": 19.6,
+   "turns": 31,
+   "add": 28.5
+  },
+  {
+   "name": "Avonmouth Portbury",
+   "lat": 51.5,
+   "lon": -2.7285,
+   "bias": -39.5,
+   "spread": 23.4,
+   "turns": 30,
+   "add": 39.5
+  },
+  {
+   "name": "Avonmouth Portbury",
+   "lat": 51.5029,
+   "lon": -2.6988,
+   "bias": -39.5,
+   "spread": 23.4,
+   "turns": 30,
+   "add": 39.5
+  },
+  {
+   "name": "Bangor",
+   "lat": 54.6652,
+   "lon": -5.6704,
+   "bias": -30.5,
+   "spread": 19.6,
+   "turns": 30,
+   "add": 30.5
+  },
+  {
+   "name": "Barmouth",
+   "lat": 52.7193,
+   "lon": -4.045,
+   "bias": -44.5,
+   "spread": 34.9,
+   "turns": 29,
+   "add": 44.5
+  },
+  {
+   "name": "Bournemouth",
+   "lat": 50.7143,
+   "lon": -1.8749,
+   "bias": -40.8,
+   "spread": 34.6,
+   "turns": 39,
+   "add": 40.8
+  },
+  {
+   "name": "Cromer",
+   "lat": 52.9343,
+   "lon": 1.3016,
+   "bias": -33.1,
+   "spread": 22.8,
+   "turns": 29,
+   "add": 33.1
+  },
+  {
+   "name": "Dover",
+   "lat": 51.1144,
+   "lon": 1.3226,
+   "bias": -23.0,
+   "spread": 22.5,
+   "turns": 28,
+   "add": 23.0
+  },
+  {
+   "name": "Fishguard",
+   "lat": 52.0132,
+   "lon": -4.9837,
+   "bias": -37.5,
+   "spread": 16.8,
+   "turns": 28,
+   "add": 37.5
+  },
+  {
+   "name": "Harwich",
+   "lat": 51.948,
+   "lon": 1.2921,
+   "bias": -46.0,
+   "spread": 21.9,
+   "turns": 29,
+   "add": 46.0
+  },
+  {
+   "name": "Heysham",
+   "lat": 54.0318,
+   "lon": -2.9203,
+   "bias": -37.0,
+   "spread": 19.4,
+   "turns": 28,
+   "add": 37.0
+  },
+  {
+   "name": "Hinkley Point",
+   "lat": 51.2106,
+   "lon": -3.1313,
+   "bias": -27.9,
+   "spread": 17.3,
+   "turns": 28,
+   "add": 27.9
+  },
+  {
+   "name": "Holyhead",
+   "lat": 53.3139,
+   "lon": -4.6204,
+   "bias": -52.5,
+   "spread": 21.5,
+   "turns": 30,
+   "add": 52.5
+  },
+  {
+   "name": "Ilfracombe",
+   "lat": 51.2111,
+   "lon": -4.1124,
+   "bias": -27.9,
+   "spread": 19.9,
+   "turns": 28,
+   "add": 27.9
+  },
+  {
+   "name": "Kinlochbervie",
+   "lat": 58.4567,
+   "lon": -5.0502,
+   "bias": -24.4,
+   "spread": 22.4,
+   "turns": 32,
+   "add": 24.4
+  },
+  {
+   "name": "Leith",
+   "lat": 55.9898,
+   "lon": -3.1817,
+   "bias": -41.2,
+   "spread": 19.1,
+   "turns": 28,
+   "add": 41.2
+  },
+  {
+   "name": "Lerwick",
+   "lat": 60.154,
+   "lon": -1.1403,
+   "bias": -27.5,
+   "spread": 29.3,
+   "turns": 48,
+   "add": 27.5
+  },
+  {
+   "name": "Liverpool",
+   "lat": 53.4497,
+   "lon": -3.0181,
+   "bias": -42.3,
+   "spread": 16.6,
+   "turns": 28,
+   "add": 42.3
+  },
+  {
+   "name": "Llandudno",
+   "lat": 53.3316,
+   "lon": -3.8252,
+   "bias": -25.6,
+   "spread": 19.5,
+   "turns": 31,
+   "add": 25.6
+  },
+  {
+   "name": "Lowestoft",
+   "lat": 52.4731,
+   "lon": 1.7501,
+   "bias": -34.1,
+   "spread": 22.2,
+   "turns": 33,
+   "add": 34.1
+  },
+  {
+   "name": "Milford Haven",
+   "lat": 51.7074,
+   "lon": -5.0518,
+   "bias": -31.1,
+   "spread": 18.3,
+   "turns": 28,
+   "add": 31.1
+  },
+  {
+   "name": "Millport",
+   "lat": 55.7498,
+   "lon": -4.9063,
+   "bias": -41.2,
+   "spread": 17.8,
+   "turns": 28,
+   "add": 41.2
+  },
+  {
+   "name": "Newhaven",
+   "lat": 50.7818,
+   "lon": 0.057,
+   "bias": -33.5,
+   "spread": 21.5,
+   "turns": 30,
+   "add": 33.5
+  },
+  {
+   "name": "Newlyn",
+   "lat": 50.103,
+   "lon": -5.5428,
+   "bias": -30.0,
+   "spread": 20.9,
+   "turns": 30,
+   "add": 30.0
+  },
+  {
+   "name": "Newport",
+   "lat": 51.55,
+   "lon": -2.9874,
+   "bias": -47.1,
+   "spread": 19.1,
+   "turns": 28,
+   "add": 47.1
+  },
+  {
+   "name": "North Shields",
+   "lat": 55.0074,
+   "lon": -1.4398,
+   "bias": -35.0,
+   "spread": 18.7,
+   "turns": 30,
+   "add": 35.0
+  },
+  {
+   "name": "Plymouth",
+   "lat": 50.3684,
+   "lon": -4.1852,
+   "bias": -38.6,
+   "spread": 19.8,
+   "turns": 28,
+   "add": 38.6
+  },
+  {
+   "name": "Port Erin",
+   "lat": 54.0854,
+   "lon": -4.7681,
+   "bias": -35.7,
+   "spread": 18.6,
+   "turns": 29,
+   "add": 35.7
+  },
+  {
+   "name": "Portpatrick",
+   "lat": 54.8425,
+   "lon": -5.12,
+   "bias": -39.6,
+   "spread": 17.1,
+   "turns": 28,
+   "add": 39.6
+  },
+  {
+   "name": "Portrush",
+   "lat": 55.2011,
+   "lon": -6.6512,
+   "bias": -20.4,
+   "spread": 26.4,
+   "turns": 28,
+   "add": 20.4
+  },
+  {
+   "name": "Portsmouth",
+   "lat": 50.8023,
+   "lon": -1.1112,
+   "bias": -4.7,
+   "spread": 19.7,
+   "turns": 29,
+   "add": 4.7
+  },
+  {
+   "name": "Sheerness",
+   "lat": 51.4456,
+   "lon": 0.7434,
+   "bias": -61.9,
+   "spread": 20.5,
+   "turns": 24,
+   "add": 61.9
+  },
+  {
+   "name": "St Marys",
+   "lat": 49.9179,
+   "lon": -6.3172,
+   "bias": -31.0,
+   "spread": 19.3,
+   "turns": 30,
+   "add": 31.0
+  },
+  {
+   "name": "Tobermory",
+   "lat": 56.6231,
+   "lon": -6.0642,
+   "bias": -26.8,
+   "spread": 17.6,
+   "turns": 28,
+   "add": 26.8
+  },
+  {
+   "name": "Weymouth",
+   "lat": 50.6085,
+   "lon": -2.4479,
+   "bias": -20.8,
+   "spread": 35.4,
+   "turns": 36,
+   "add": 20.8
+  },
+  {
+   "name": "Whitby",
+   "lat": 54.49,
+   "lon": -0.6146,
+   "bias": -36.7,
+   "spread": 17.9,
+   "turns": 29,
+   "add": 36.7
+  },
+  {
+   "name": "Wick",
+   "lat": 58.441,
+   "lon": -3.0863,
+   "bias": -25.0,
+   "spread": 19.5,
+   "turns": 30,
+   "add": 25.0
+  },
+  {
+   "name": "Workington",
+   "lat": 54.6507,
+   "lon": -3.5672,
+   "bias": -36.4,
+   "spread": 21.0,
+   "turns": 28,
+   "add": 36.4
+  }
+ ]
+}

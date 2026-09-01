@@ -953,7 +953,11 @@ def tide_bias(lat, lon):
         d = haversine(lat, lon, g["lat"], g["lon"])
         if d < bestkm:
             best, bestkm = g, d
-    return (best["bias"] if best else 0.0), (best["name"] if best else None)
+    # "add", not "bias". bias is the error measured (model minus gauge, negative
+    # because the model runs early); add is what to do about it, and it is the
+    # other sign. Using bias here moved every turn further from the truth.
+    return (best.get("add", -best.get("bias", 0.0)) if best else 0.0), \
+           (best["name"] if best else None)
 
 
 def tide_turns(times, levels, after):
