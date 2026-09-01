@@ -196,3 +196,19 @@ OPEN_METEO_MARINE = ("https://marine-api.open-meteo.com/v1/marine?latitude={lats
 # labelled as one, and never called tide times.
 
 USER_AGENT = "swim-collector/1.0 (personal bathing water tool; open data)"
+
+
+# Real tide predictions for Ireland, from the Marine Institute, CC BY 4.0.
+#
+# Their EPA Beaches dataset has a station at essentially every Irish bathing
+# water: 219 of them, a median 1.1km from the beaches this site lists, 83% within
+# 2km. The far outliers are inland loughs, which correctly have no tide at all.
+#
+# This is a proper regional tidal model sampled every TEN MINUTES, against a
+# global model on an 8km grid sampled hourly and running about half an hour
+# early. Where a station is close enough, it wins.
+IMI_TIDE = ("https://erddap.marine.ie/erddap/tabledap/imiTidePredictionEpa.json"
+            "?stationID,time,latitude,longitude,sea_surface_height"
+            "&time%3E={start}&time%3C={end}")
+IMI_TIDE_ATTRIB = "Tide predictions for Ireland by the Marine Institute, CC BY 4.0"
+IMI_TIDE_MAX_KM = 5.0

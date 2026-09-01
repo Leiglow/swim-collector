@@ -962,6 +962,57 @@ def tide_turns(times, levels, after):
     return out[:4]
 
 
+def irish_tides(feed):
+    """Real tide predictions for Ireland, from the Marine Institute.
+
+    Better than the global model in every way that matters here: it is a
+    regional tidal model rather than a worldwide one, it has a station at
+    essentially every Irish bathing water rather than an 8km grid that snaps to
+    the nearest wet cell, and it is sampled every ten minutes rather than hourly.
+    CC BY 4.0, so it can be stored and republished with credit.
+
+    Returns {stationID: {"at": [lat, lon], "x": [[iso, 1 high | 0 low], ...]}}.
+    """
+    start = NOW.strftime("%Y-%m-%dT%H:00:00Z")
+    end = (NOW + timedelta(hours=40)).strftime("%Y-%m-%dT%H:00:00Z")
+    d = fetch_json(S.IMI_TIDE.format(start=start, end=end), timeout=180, tries=2)
+    rows = (d.get("table") or {}).get("rows") or []
+    cols = (d.get("table") or {}).get("columnNames") or []
+    if not rows:
+        feed.error = "no rows"
+        return {}
+    ix = {name: i for i, name in enumerate(cols)}
+
+    series = defaultdict(list)
+    where = {}
+    for r in rows:
+        sid = r[ix["stationID"]]
+        v = r[ix["sea_surface_height"]]
+        if v is None:
+            continue
+        series[sid].append((r[ix["time"]], v))
+        where[sid] = [round(r[ix["latitude"]], 4), round(r[ix["longitude"]], 4)]
+
+    out = {}
+    for sid, pts in series.items():
+        pts.sort()
+        times = [t for t, _ in pts]
+        levels = [v for _, v in pts]
+        # Ten minute sampling, so a turn is already within about five minutes and
+        # the parabola fit that the hourly model needs is not worth doing here.
+        turns = []
+        for i in range(1, len(levels) - 1):
+            a, b, c = levels[i - 1], levels[i], levels[i + 1]
+            if a < b >= c:
+                turns.append([times[i], 1])
+            elif a > b <= c:
+                turns.append([times[i], 0])
+        if turns:
+            out[sid] = {"at": where[sid], "x": turns[:4]}
+    feed.ok, feed.count, feed.at = True, len(out), NOW
+    return out
+
+
 def sea_temperature(sites, feed, previous=None):
     """Sea surface temperature for the coastal beaches, from the marine service.
 
@@ -1565,6 +1616,7 @@ def previous_week():
     try:
         d = fetch_json(url + ("&" if "?" in url else "?") + "week=1", tries=1, timeout=20)
         return {"seaAt": d.get("seaAt"), "sea": d.get("sea") or {},
+                "stations": d.get("stations") or {},
                 "days": d.get("days") or [], "cells": d.get("cells") or {}}
     except Exception:                               # noqa: BLE001
         return None
@@ -1773,6 +1825,15 @@ def main():
     else:
         print("    %-32s waiting for the first forecast" % "Sea temperature")
 
+    # Ireland has real predictions, so Ireland does not use the global model.
+    stations = {}
+    if sea or (prev_week and prev_week.get("cells")):
+        st_res = run("Irish tide predictions", irish_tides, escalates=False)
+        stations = st_res or (prev_week or {}).get("stations") or {}
+        print("    %-32s %4d stations%s"
+              % ("Irish tide predictions", len(stations),
+                 "" if st_res else " (carried forward)"))
+
     ctx = {"prf": warnings, "incidents": incidents, "sepa": sepa, "roi": roi, "ni": ni,
            "southern": southern, "rain": rain, "spills": spills, "nearby": nearby,
            "outfall_co": outfall_co, "outfall_name": outfall_name,
@@ -1886,6 +1947,7 @@ def main():
             "seaGrid": SEA_GRID,
             "seaAt": sea_stamp,
             "sea": sea_now,
+            "stations": stations,
             "cells": cells,
         }
         week_body = json.dumps(week, separators=(",", ":"))
