@@ -78,7 +78,20 @@ SEA_KINDS = ("Coastal", "Estuary")
 # is 22.8km. Instow, seventeen kilometres up the Taw estuary, was being handed
 # Croyde Bay's open water. Beyond this distance the answer is about somewhere
 # else and is thrown away rather than displayed.
-SEA_MAX_SNAP_KM = 12.0
+SEA_MAX_SNAP_KM = 20.0
+# Two different limits, because they are two different claims.
+#
+# TEMPERATURE is a smooth field. Measured across all 252 published cells: two
+# points 12 to 20km apart differ by a median 0.25C, 90th percentile 0.55C. At
+# that size a reading from twenty kilometres away is honestly the same water,
+# and refusing it cost 110 coastal beaches their temperature for no gain.
+#
+# WAVE HEIGHT is not smooth and is not a claim about the region, it is a claim
+# about this beach. Instow, seventeen kilometres up the Taw estuary, was handed
+# Croyde Bay's open Atlantic and 1.9 metres of swell. So waves keep the twelve
+# kilometre rule and the page applies it separately.
+SEA_TEMP_KM = 20.0
+SEA_WAVE_KM = 12.0
 # Waterfalls get their own, slower cadence. Open-Meteo counts LOCATIONS against a
 # 10,000/day free allowance, and the 2,557 waterfalls add 859 grid cells to the
 # 540 the beaches need. At the beach cadence that would be 13,400 calls a day —
