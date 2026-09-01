@@ -172,7 +172,7 @@ SW_SPILLING = "OF"          # OF = Overflowing, RO = Recent Overflow, NO = none,
 OPEN_METEO = ("https://api.open-meteo.com/v1/forecast?latitude={lats}&longitude={lons}"
               "&hourly=precipitation"
               "&daily=weather_code,temperature_2m_max,temperature_2m_min,"
-              "precipitation_sum,wind_speed_10m_max"
+              "precipitation_sum,wind_speed_10m_max,wind_direction_10m_dominant"
               "&past_days=2&forecast_days=7&timezone=GMT")
 OPEN_METEO_BATCH = 100
 
@@ -181,8 +181,19 @@ OPEN_METEO_BATCH = 100
 # the right answer and is shown as nothing rather than guessed at.
 OPEN_METEO_MARINE = ("https://marine-api.open-meteo.com/v1/marine?latitude={lats}"
                      "&longitude={lons}&daily=sea_surface_temperature_max,"
-                     "sea_surface_temperature_min&hourly=sea_level_height_msl"
+                     "sea_surface_temperature_min,wave_height_max,wave_period_max,"
+                     "swell_wave_height_max,swell_wave_period_max"
+                     "&hourly=sea_level_height_msl"
                      "&forecast_days=3&timezone=GMT")
+# Wave and swell ride along on the call already being made, so they cost nothing.
+# Six daily variables plus one hourly is still one call per location: Open-Meteo
+# only charges more above ten variables or a fortnight.
+#
+# They carry the SAME twelve kilometre guard as the sea temperature, and for a
+# better reason. A temperature from twenty kilometres out is roughly right. A
+# wave height from twenty kilometres out is a claim about a different piece of
+# water: Instow, seventeen kilometres up an estuary, was being handed Croyde
+# Bay's open Atlantic and 1.9 metres of swell.
 # sea_level_height_msl is a MODEL of the tide, not a tide table. Checked against
 # the Environment Agency's Newlyn gauge on 31 August 2026: the model put the
 # evening high at 18:00 and the gauge measured it at 18:30, so the TIMING is good

@@ -926,6 +926,36 @@ def cell_key(key):
     return "%d,%d" % key
 
 
+# How early the model runs, harbour by harbour. Built by tools/build_tide_bias.py
+# against the Environment Agency's gauges; see that file for why this exists.
+_BIAS = None
+BIAS_MAX_KM = 80.0
+
+
+def tide_bias(lat, lon):
+    """Minutes to add to a modelled turn here, from the nearest gauge.
+
+    Beyond BIAS_MAX_KM there is no gauge close enough to speak for this stretch
+    of coast and the model is left alone: a correction fitted in the Bristol
+    Channel says nothing useful about Shetland. Ireland gets nothing from this
+    because the EA network stops at the border, which is right — Irish beaches
+    use the Marine Institute's real predictions instead.
+    """
+    global _BIAS
+    if _BIAS is None:
+        path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "tide_bias.json")
+        try:
+            _BIAS = json.load(io.open(path, encoding="utf-8")).get("gauges") or []
+        except Exception:                           # noqa: BLE001
+            _BIAS = []
+    best, bestkm = None, BIAS_MAX_KM
+    for g in _BIAS:
+        d = haversine(lat, lon, g["lat"], g["lon"])
+        if d < bestkm:
+            best, bestkm = g, d
+    return (best["bias"] if best else 0.0), (best["name"] if best else None)
+
+
 def tide_turns(times, levels, after):
     """Where the modelled tide turns, from an hourly curve.
 
@@ -1043,7 +1073,7 @@ def sea_temperature(sites, feed, previous=None):
     batches = [keys[i:i + S.OPEN_METEO_BATCH]
                for i in range(0, len(keys), S.OPEN_METEO_BATCH)]
 
-    got, failed, snapped = {}, 0, 0
+    got, failed, snapped, corrected = {}, 0, 0, 0
     for n, batch in enumerate(batches):
         pts = [cells[k][0] for k in batch]
         url = S.OPEN_METEO_MARINE.format(
@@ -1070,7 +1100,16 @@ def sea_temperature(sites, feed, previous=None):
             dates = day.get("time") or []
             hi = day.get("sea_surface_temperature_max") or []
             lo = day.get("sea_surface_temperature_min") or []
-            rows, today = [], NOW.strftime("%Y-%m-%d")
+            wh = day.get("wave_height_max") or []
+            wp = day.get("wave_period_max") or []
+            sh = day.get("swell_wave_height_max") or []
+            sp = day.get("swell_wave_period_max") or []
+
+            def at(seq, i):
+                v = seq[i] if i < len(seq) else None
+                return None if v is None else round(v, 1)
+
+            rows, sea_state, today = [], [], NOW.strftime("%Y-%m-%d")
             for i, dt in enumerate(dates):
                 if dt < today:
                     continue
@@ -1078,6 +1117,8 @@ def sea_temperature(sites, feed, previous=None):
                 b = lo[i] if i < len(lo) else None
                 rows.append([None if b is None else round(b, 1),
                              None if a is None else round(a, 1)])
+                # wave height, wave period, swell height, swell period
+                sea_state.append([at(wh, i), at(wp, i), at(sh, i), at(sp, i)])
             # All null means this cell is not at sea. Publish nothing for it.
             #
             # The coordinates the model actually used travel with the reading.
@@ -1089,9 +1130,25 @@ def sea_temperature(sites, feed, previous=None):
             hourly = (blk or {}).get("hourly") or {}
             turns = tide_turns(hourly.get("time") or [],
                                hourly.get("sea_level_height_msl") or [], NOW)
+            # Shift the model onto the coast it is describing. It runs early
+            # nearly everywhere, by about half an hour, and by a consistent
+            # amount at each place, so one figure from the nearest gauge takes
+            # most of that out.
+            shift, gauge = tide_bias(used_lat, used_lon)
+            if shift and turns:
+                moved = []
+                for iso_t, kind in turns:
+                    when = parse_iso(iso_t)
+                    if when:
+                        moved.append([iso(when + timedelta(minutes=int(round(shift)))), kind])
+                if moved:
+                    turns = moved
+                    corrected += 1
 
             if rows and any(r[0] is not None or r[1] is not None for r in rows):
                 rec = {"at": [round(used_lat, 4), round(used_lon, 4)], "t": rows}
+                if any(any(x is not None for x in row) for row in sea_state):
+                    rec["w"] = sea_state
                 if turns:
                     rec["tide"] = turns
                 got["%d,%d" % key] = rec
@@ -1106,6 +1163,9 @@ def sea_temperature(sites, feed, previous=None):
     if snapped:
         print("    %-32s %4d cells dropped: nearest sea cell over %.0fkm away"
               % ("", snapped, SEA_MAX_SNAP_KM))
+    if corrected:
+        print("    %-32s %4d cells had their tide shifted onto a gauge"
+              % ("", corrected))
     return got, NOW
 
 
@@ -1204,7 +1264,8 @@ def rainfall(sites, feed, previous=None, max_age_min=None):
                         return None if v is None else round(v, 1)
                     rows.append([day.get("weather_code", [None])[i],
                                  at("temperature_2m_min"), at("temperature_2m_max"),
-                                 at("precipitation_sum"), at("wind_speed_10m_max")])
+                                 at("precipitation_sum"), at("wind_speed_10m_max"),
+                                 at("wind_direction_10m_dominant")])
                 if rows:
                     DAILY[cell_key(key)] = {"d": [d for d in dates if d >= today],
                                             "w": rows}
