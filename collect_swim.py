@@ -1003,10 +1003,10 @@ def tide_turns(times, levels, after):
         if shift < -1 or shift > 1:
             shift = 0.0
         when = when + timedelta(minutes=int(round(shift * 60)))
-        if after and when <= after:
+        if after and when < after:
             continue
         out.append([iso(when), 1 if rising_then_falling else 0])
-    return out[:4]
+    return out[:14]
 
 
 def irish_tides(feed):
@@ -1055,7 +1055,7 @@ def irish_tides(feed):
             elif a > b <= c:
                 turns.append([times[i], 0])
         if turns:
-            out[sid] = {"at": where[sid], "x": turns[:4]}
+            out[sid] = {"at": where[sid], "x": turns[:14]}
     feed.ok, feed.count, feed.at = True, len(out), NOW
     return out
 
@@ -1146,7 +1146,8 @@ def sea_temperature(sites, feed, previous=None):
             # attempt at this. The page has to be able to measure for itself.
             hourly = (blk or {}).get("hourly") or {}
             turns = tide_turns(hourly.get("time") or [],
-                               hourly.get("sea_level_height_msl") or [], NOW)
+                               hourly.get("sea_level_height_msl") or [],
+                               NOW.replace(hour=0, minute=0, second=0, microsecond=0))
             # Shift the model onto the coast it is describing. It runs early
             # nearly everywhere, by about half an hour, and by a consistent
             # amount at each place, so one figure from the nearest gauge takes
@@ -1276,6 +1277,13 @@ def rainfall(sites, feed, previous=None, max_age_min=None):
                 for i, d in enumerate(dates):
                     if d < today:
                         continue                # past_days=2 is for the rain totals
+                    def sun_at(day, name, i):
+                        v = (day.get(name) or [None] * (i + 1))[i]
+                        # "2026-09-01T20:04" -> "20:04". GMT throughout, and the
+                        # page converts to local time the same way it does for
+                        # the tide.
+                        return v[11:16] if isinstance(v, str) and len(v) >= 16 else None
+
                     def at(name, i=i, day=day):
                         v = (day.get(name) or [None] * len(dates))[i]
                         return None if v is None else round(v, 1)
@@ -1283,7 +1291,8 @@ def rainfall(sites, feed, previous=None, max_age_min=None):
                                  at("temperature_2m_min"), at("temperature_2m_max"),
                                  at("precipitation_sum"), at("wind_speed_10m_max"),
                                  at("wind_direction_10m_dominant"),
-                                 at("wind_gusts_10m_max"), at("uv_index_max")])
+                                 at("wind_gusts_10m_max"), at("uv_index_max"),
+                                 sun_at(day, "sunset", i)])
                 if rows:
                     DAILY[cell_key(key)] = {"d": [d for d in dates if d >= today],
                                             "w": rows}
