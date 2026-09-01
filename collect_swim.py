@@ -926,6 +926,42 @@ def cell_key(key):
     return "%d,%d" % key
 
 
+def tide_turns(times, levels, after):
+    """Where the modelled tide turns, from an hourly curve.
+
+    Hourly samples put a turning point within half an hour of the truth, which
+    is about the accuracy of the model anyway. Fitting a parabola through the
+    three points around each turn recovers most of that: the peak of the curve
+    rarely lands exactly on the hour.
+
+    Returns [[iso, 1 for high, 0 for low], ...], soonest first. Heights are NOT
+    returned. The model's datum is not the datum a tide table uses, so a number
+    in metres here would look like a tide height and would not be one.
+    """
+    out = []
+    for i in range(1, len(levels) - 1):
+        a, b, c = levels[i - 1], levels[i], levels[i + 1]
+        if a is None or b is None or c is None:
+            continue
+        rising_then_falling = a < b >= c
+        falling_then_rising = a > b <= c
+        if not (rising_then_falling or falling_then_rising):
+            continue
+        when = parse_iso(times[i] + ":00Z" if len(times[i]) == 16 else times[i])
+        if not when:
+            continue
+        # Vertex of the parabola through (-1,a) (0,b) (1,c), in hours from b.
+        denom = (a - 2 * b + c)
+        shift = 0.0 if denom == 0 else 0.5 * (a - c) / denom
+        if shift < -1 or shift > 1:
+            shift = 0.0
+        when = when + timedelta(minutes=int(round(shift * 60)))
+        if after and when <= after:
+            continue
+        out.append([iso(when), 1 if rising_then_falling else 0])
+    return out[:4]
+
+
 def sea_temperature(sites, feed, previous=None):
     """Sea surface temperature for the coastal beaches, from the marine service.
 
@@ -999,9 +1035,15 @@ def sea_temperature(sites, feed, previous=None):
             # was dropped simply borrows a neighbour's, which is how Gyllyngvase
             # kept showing water from twenty kilometres out after the first
             # attempt at this. The page has to be able to measure for itself.
+            hourly = (blk or {}).get("hourly") or {}
+            turns = tide_turns(hourly.get("time") or [],
+                               hourly.get("sea_level_height_msl") or [], NOW)
+
             if rows and any(r[0] is not None or r[1] is not None for r in rows):
-                got["%d,%d" % key] = {"at": [round(used_lat, 4), round(used_lon, 4)],
-                                      "t": rows}
+                rec = {"at": [round(used_lat, 4), round(used_lon, 4)], "t": rows}
+                if turns:
+                    rec["tide"] = turns
+                got["%d,%d" % key] = rec
         if n < len(batches) - 1:
             time.sleep(len(batch) / 9.0)
 

@@ -181,6 +181,18 @@ OPEN_METEO_BATCH = 100
 # the right answer and is shown as nothing rather than guessed at.
 OPEN_METEO_MARINE = ("https://marine-api.open-meteo.com/v1/marine?latitude={lats}"
                      "&longitude={lons}&daily=sea_surface_temperature_max,"
-                     "sea_surface_temperature_min&forecast_days=7&timezone=GMT")
+                     "sea_surface_temperature_min&hourly=sea_level_height_msl"
+                     "&forecast_days=3&timezone=GMT")
+# sea_level_height_msl is a MODEL of the tide, not a tide table. Checked against
+# the Environment Agency's Newlyn gauge on 31 August 2026: the model put the
+# evening high at 18:00 and the gauge measured it at 18:30, so the TIMING is good
+# to about half an hour. The heights are on a different datum from the gauge and
+# are not comparable, so they are never published as heights.
+#
+# Real tide times are not available to this site. UKHO's free Discovery tier
+# covers 607 stations but forbids caching outright — "storing the data in any
+# kind is in breach of Copyright law" — and caching is exactly what a collector
+# writing to KV does. The paid tiers permit it. So this is a rough state, always
+# labelled as one, and never called tide times.
 
 USER_AGENT = "swim-collector/1.0 (personal bathing water tool; open data)"
