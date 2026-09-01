@@ -1282,7 +1282,8 @@ def rainfall(sites, feed, previous=None, max_age_min=None):
                     rows.append([day.get("weather_code", [None])[i],
                                  at("temperature_2m_min"), at("temperature_2m_max"),
                                  at("precipitation_sum"), at("wind_speed_10m_max"),
-                                 at("wind_direction_10m_dominant")])
+                                 at("wind_direction_10m_dominant"),
+                                 at("wind_gusts_10m_max"), at("uv_index_max")])
                 if rows:
                     DAILY[cell_key(key)] = {"d": [d for d in dates if d >= today],
                                             "w": rows}

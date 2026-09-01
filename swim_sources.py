@@ -172,7 +172,8 @@ SW_SPILLING = "OF"          # OF = Overflowing, RO = Recent Overflow, NO = none,
 OPEN_METEO = ("https://api.open-meteo.com/v1/forecast?latitude={lats}&longitude={lons}"
               "&hourly=precipitation"
               "&daily=weather_code,temperature_2m_max,temperature_2m_min,"
-              "precipitation_sum,wind_speed_10m_max,wind_direction_10m_dominant"
+              "precipitation_sum,wind_speed_10m_max,wind_direction_10m_dominant,"
+              "wind_gusts_10m_max,uv_index_max"
               "&past_days=2&forecast_days=7&timezone=GMT")
 OPEN_METEO_BATCH = 100
 
