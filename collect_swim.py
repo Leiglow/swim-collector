@@ -1221,9 +1221,9 @@ def rainfall(sites, feed, previous=None, max_age_min=None):
             # apply the same coverage bar as a fresh fetch.
             enough = len(previous["rain"]) >= len(sites) * 0.95
             feed.ok, feed.count, feed.at = enough, len(previous["rain"]), when
-            feed.partial = "carried forward, %d minutes old%s" % (
-                int(age * 60), "" if enough else " (%d of %d beaches)" % (
-                    len(previous["rain"]), len(sites)))
+            feed.partial = None if enough else (
+                "carried forward and short, %d of %d beaches"
+                % (len(previous["rain"]), len(sites)))
             return previous["rain"], when
 
     cells = {}
@@ -1886,8 +1886,7 @@ def main():
             print("    %-32s %4d" % (k, feeds[k].count))
 
     print("Rain")
-    rain_res = run("Rainfall", lambda f: rainfall(sites, f, previous_snapshot()),
-                   escalates=False)
+    rain_res = run("Rainfall", lambda f: rainfall(sites, f, previous_snapshot()))
     rain, rain_at = rain_res if rain_res else ({}, None)
     print("    %-32s %4d beaches%s"
           % ("Rainfall", len(rain),
