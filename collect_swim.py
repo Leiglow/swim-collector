@@ -1345,6 +1345,23 @@ LOCAL_SNAPSHOT = ".snapshot-local.json"
 LOCAL_FALLS = ".falls-local.json"
 
 
+# EVERY REASON TYPE THIS COLLECTOR CAN EMIT.
+#
+# The site prints the regulator's own wording for a reason, and that wording is
+# frequently circular — "Advised against today / Advice against bathing:
+# pollution risk warning" says nothing a reader can act on. The website carries
+# an explanation per TYPE to fix that, so a type appearing here that the website
+# has never heard of puts it straight back to printing a bare restatement, on
+# whichever beaches happen to get it, with nobody told.
+#
+# Two guards, one at each end. This one notices a feed producing something new
+# within half an hour. The website's build refuses to ship if it cannot explain
+# everything on this list. Keep them in step: this is the source.
+KNOWN_WHY_TYPES = {
+    "advised", "class", "clear", "forecast", "rain",
+    "spill", "spill-far", "spill-recent", "warning",
+}
+
 ORDER = {"ok": 0, "unknown": 1, "caution": 2, "advised": 3, "avoid": 4}
 
 AUTHORITY = {"England": "Environment Agency", "Wales": "Natural Resources Wales",
@@ -2053,6 +2070,38 @@ def main():
             publish(week_body, kind="week")
         publish(brief_body, kind="brief")
 
+    # AFTER publishing, deliberately. A reason type nobody has explained is
+    # worth a red run; it is not worth holding back the readings, which would
+    # leave the whole site stale over a wording problem.
+    used = set()
+    for v in out.values():
+        for w in (v.get("why") or []):
+            if isinstance(w, dict) and w.get("t"):
+                used.add(w["t"])
+    new_types = sorted(used - KNOWN_WHY_TYPES)
+    if new_types:
+        print()
+        print("!" * 70)
+        print("A FEED HAS PRODUCED A REASON TYPE THIS SITE CANNOT EXPLAIN:")
+        for t in new_types:
+            n = sum(1 for v in out.values()
+                    for w in (v.get("why") or [])
+                    if isinstance(w, dict) and w.get("t") == t)
+            print("    %-16s on %d beach(es)" % (t, n))
+        print()
+        print("The readings HAVE been published, so the site is current. But those")
+        print("beaches are showing the regulator's own wording with nothing said")
+        print("about what it means, which is how Hastings read 'Advised against")
+        print("today / Advice against bathing: pollution risk warning'.")
+        print("Add each type to KNOWN_WHY_TYPES here and to WHY_MEANS in")
+        print("tools/swim_site_assets.py, then rebuild the site.")
+        print("!" * 70)
+        # Non-zero AFTER the publish, so the run goes red and stays red every
+        # half hour until somebody looks, while the readings themselves keep
+        # flowing. A wording gap must never hold back a water quality warning.
+        return 1
+    return 0
+
 
 def publish(body, kind=None):
     url = os.environ.get("SWIM_INGEST_URL")
@@ -2096,4 +2145,4 @@ def publish(body, kind=None):
 
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main() or 0)
