@@ -21,6 +21,8 @@ import os
 import ssl
 import sys
 import time
+
+import places
 import unicodedata
 import urllib.parse
 import urllib.request
@@ -202,6 +204,12 @@ def main():
                         near.append((round(km, 1), o["slug"], o["name"]))
         near.sort()
         f["near"] = [[s, n, k] for k, s, n in near[:6]]
+
+    # The towns each named waterfall is near, for the search box. Field is
+    # "towns", NOT "near" — near is already taken above for nearby waterfalls,
+    # and quietly overwriting it would empty every "other falls close by" list.
+    # Only the named ones: the other 1,876 have no page to be found.
+    places.add_nearby_towns([f for f in falls if f.get("name")], field="towns")
 
     by_country = defaultdict(int)
     for f in falls:
