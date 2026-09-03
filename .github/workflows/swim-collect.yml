@@ -54,6 +54,15 @@ jobs:
         with:
           python-version: "3.12"
 
+      # The only dependency this collector has, and it is only for the
+      # notifications. Web Push signing and payload encryption have to be
+      # exactly right, and getting them wrong fails SILENTLY — no notification
+      # arrives, which on this site reads as "nothing is wrong". That is not a
+      # thing to hand-roll, so it uses the maintained library. Pinned, because a
+      # surprise upgrade to the one piece of crypto here is not wanted at 04:00.
+      - name: Install the push library
+        run: python -m pip install --quiet "pywebpush==2.0.3"
+
       - name: Collect and publish
         env:
           # The URLs come from repository secrets rather than being written here,
@@ -65,6 +74,10 @@ jobs:
           # One government API refuses requests from GitHub's IP ranges, so those
           # calls — and only those — are relayed through the site's own domain.
           SWIM_FETCH_PROXY: ${{ secrets.SWIM_FETCH_PROXY }}
+          # The Web Push signing key. Absent until notifications are switched
+          # on, and swim_push does nothing at all without it — which is the
+          # correct behaviour, not a failure.
+          VAPID_PRIVATE: ${{ secrets.VAPID_PRIVATE }}
         run: |
           # Ask GitHub to vouch for this run. The audience ties the token to the
           # one endpoint that accepts it, so it is no use anywhere else, and it

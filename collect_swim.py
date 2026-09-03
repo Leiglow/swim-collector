@@ -1695,6 +1695,24 @@ def collect_waterfalls(feeds):
     }
 
 
+def previous_sites():
+    """The per-site verdicts the site is showing RIGHT NOW.
+
+    Read before publishing, or it would be compared against itself and nothing
+    would ever look like it had changed. Returning None on any problem is
+    deliberate: swim_push treats "no previous state" as nothing to announce,
+    which is right — the alternative is telling everybody about every warned
+    beach in the country the first time this fails and recovers.
+    """
+    url = os.environ.get("SWIM_INGEST_URL", "").replace("/ingest", "/data")
+    if not url:
+        return None
+    try:
+        return (fetch_json(url, tries=1, timeout=25) or {}).get("sites")
+    except Exception:                               # noqa: BLE001
+        return None
+
+
 def previous_falls():
     url = os.environ.get("SWIM_INGEST_URL", "").replace("/ingest", "/data")
     if not url:
@@ -2063,12 +2081,32 @@ def main():
                  len(gzip.compress(week_body.encode())) / 1024.0))
 
     if "--publish" in sys.argv:
+        # What the site is showing before we replace it. Fetched first, or the
+        # comparison would be against the readings we are about to publish.
+        was = previous_sites()
+
         publish(body)
         if falls_body:
             publish(falls_body, kind="falls")
         if week_body:
             publish(week_body, kind="week")
         publish(brief_body, kind="brief")
+
+        # Tell anybody who asked to be told. After publishing, so a beach named
+        # in a notification is already showing the warning when they tap it —
+        # and never before, or the message would arrive first and the page would
+        # still say the beach was fine.
+        #
+        # Wrapped, and its failures are printed rather than raised: the readings
+        # are the job, and a notification problem must never take the site
+        # stale. The heartbeat missing is itself how that gets noticed.
+        try:
+            import swim_push
+            places = {sid: {"name": st["name"], "slug": st["slug"]}
+                      for sid, st in by_id.items()}
+            print("    " + swim_push.run(was, snapshot.get("sites") or {}, places))
+        except Exception as e:                      # noqa: BLE001
+            print("    push: skipped after an error — %s" % str(e)[:160])
 
     # AFTER publishing, deliberately. A reason type nobody has explained is
     # worth a red run; it is not worth holding back the readings, which would
