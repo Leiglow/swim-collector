@@ -1,8 +1,18 @@
 """Towns near enough to a place to be worth searching for.
 
 places.json is GeoNames populated places in Britain and Ireland with a
-population of 5,000 or more, trimmed to those within 30km of at least one
-bathing water. CC BY 4.0. It never leaves this repository — the names it
+population of 1,000 or more, trimmed to those within 30km of a bathing water
+OR a named waterfall. CC BY 4.0.
+
+Both, because the trim was to bathing waters alone and the same gazetteer names
+the waterfalls — which are inland, in precisely the places bathing waters are
+not. Every Lake District, Snowdonia and Highland waterfall was being named after
+nothing: Keswick, Ambleside, Bakewell and Ullapool were all absent.
+
+The cut was 5,000 and that was too blunt: it dropped Ullapool, Machynlleth,
+Betws-y-Coed and Tenby, which are exactly the small places beside water that
+people search for. Dropping it to 1,000 costs 1.5KB gzipped on sites.json and
+adds about 2,300 towns. It never leaves this repository — the names it
 produces are baked into the registers at build time, so a browser fetches four
 extra words rather than a gazetteer, and nobody's location is sent anywhere.
 
