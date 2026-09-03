@@ -820,7 +820,14 @@ def ea_incidents(feed):
 # Matched as a closed set on purpose: anything outside it — "Awaiting Prediction"
 # before the morning run, or some future wording — must not be read as an
 # all-clear. See the verdict function for what happens to the rest.
-SEPA_CLEAR = {"good", "excellent", "no pollution risk", "normal"}
+# SEPA's feed emits only Good, Poor, Pollution Incident and "-" (verified live
+# 2026-09-03: 30 rows, Poor 16, Good 11, Pollution Incident 2, "-" 1). The other
+# three entries this set used to carry — excellent, no pollution risk, normal —
+# are not SEPA vocabulary and matched nothing. Harmless, because an unrecognised
+# wording already falls through to a gap rather than an all-clear, but dead
+# vocabulary in the one place that is meant to be a closed set is how a future
+# reader learns the wrong words.
+SEPA_CLEAR = {"good"}
 
 
 def predictions_scotland(feed, by_country_name):
@@ -1497,7 +1504,10 @@ def verdict(site, ctx):
         age = hours_since(parse_iso(ni.get("at"))) if ni.get("at") else None
         if (ni["indicator"]).lower() == "nobathing":
             level = raise_to("avoid")
-            why.append({"t": "warning", "s": "DAERA", "text": "No bathing advised",
+            # DAERA's own term, from the nidirect page its feed cites. "No
+            # bathing advised" was this site's rendering of the raw API token
+            # NoBathing and appears in neither DAERA's nor nidirect's wording.
+            why.append({"t": "warning", "s": "DAERA", "text": "Advice against bathing",
                         "at": ni.get("at")})
         elif age is not None and age <= 24 * 8:
             checked.append("Most recent bacterial sample")
