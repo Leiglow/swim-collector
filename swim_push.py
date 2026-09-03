@@ -23,6 +23,7 @@ Sending is skipped entirely unless VAPID_PRIVATE is set, so a runner without the
 secret does everything else as normal.
 """
 
+import base64
 import json
 import os
 import ssl
@@ -35,6 +36,32 @@ WORD = {"avoid": "Do not swim today", "advised": "Advised against today"}
 
 CTX = ssl.create_default_context()
 TIMEOUT = 30
+
+
+def _key_fault(k):
+    """What is wrong with the signing key, in words, without ever printing it.
+
+    pywebpush answers a bad key with "Could not deserialize key data", which is
+    true of a truncated key, of standard-instead-of-urlsafe base64, and of the
+    PUBLIC key pasted by mistake — and does not distinguish them. Since the key
+    is a secret, the only way to tell somebody which mistake they made is to
+    describe its shape rather than show it.
+    """
+    if not k:
+        return "not set"
+    k = k.strip()
+    try:
+        raw = base64.urlsafe_b64decode(k + "=" * (-len(k) % 4))
+    except Exception:                                 # noqa: BLE001
+        return "not valid base64url, and %d characters long" % len(k)
+    if len(raw) == 65 and raw[0] == 4:
+        return ("this is the PUBLIC key, not the private one. It is 65 bytes "
+                "beginning 0x04, which is the public point. The private key is "
+                "32 bytes and 43 characters of base64url.")
+    if len(raw) != 32:
+        return ("decodes to %d bytes, not the 32 a VAPID private key must be. "
+                "It is %d characters long; the right one is 43." % (len(raw), len(k)))
+    return None
 
 
 def _token(audience):
@@ -111,13 +138,18 @@ def run(previous_sites, current_sites, places, base_url=None, dry_run=False,
     link. Nothing about a person is passed in or kept.
     """
     base = base_url or os.environ.get("SWIM_DATA_BASE") or ""
-    private_key = os.environ.get("VAPID_PRIVATE")
+    private_key = (os.environ.get("VAPID_PRIVATE") or "").strip() or None
     contact = os.environ.get("VAPID_CONTACT", "mailto:hello@caniswim.co.uk")
     if not base:
         return "push: no SWIM_DATA_BASE — skipped"
     if not private_key:
         return "push: VAPID_PRIVATE not set — nothing sent, which is correct " \
                "until the site has been switched on"
+    fault = _key_fault(private_key)
+    if fault:
+        # Loud, because everything downstream of this silently sends nothing,
+        # and silence is the failure that reads as an all clear.
+        return "push: THE SIGNING KEY IS WRONG — %s Nothing was sent." % fault
 
     # A way to prove delivery without waiting for a beach to actually turn bad.
     # Worth having permanently, not just on the day this was built: "did the
