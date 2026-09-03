@@ -1327,6 +1327,20 @@ def rainfall(sites, feed, previous=None, max_age_min=None):
 AVOID_WORDS = ("advice against bathing", "do not swim", "prohibited",
                "swimming not advised", "no bathing")
 
+# EPA Ireland separates the two in its own open-data spec, and beaches.ie posts
+# them as different notices: a bathing ADVISORY ("Advice Not to Swim", live
+# string "Swimming not advised") against a bathing PROHIBITION ("Bathing is
+# temporarily prohibited", "Do not Swim"). Both used to land on `avoid` here,
+# so an Irish advisory was shown under the site's strongest words while the
+# identical English advisory — the EA's advice against bathing — sat a band
+# lower. Same regulatory state, two different answers depending on the country.
+#
+# The prohibition list is checked FIRST, because "Do not Swim" contains neither
+# of the advisory phrases but must never fall through to one.
+ROI_PROHIBIT_WORDS = ("prohibit", "do not swim", "no bathing", "closed")
+ROI_ADVISORY_WORDS = ("swimming not advised", "advice not to swim",
+                      "advised against", "not advised")
+
 # "unknown" sits ABOVE "ok": not knowing is a worse answer than knowing it is
 # clear, and must be able to displace a green tick.
 # Five levels, and the split between the top two is the point of them. "avoid"
@@ -1461,9 +1475,17 @@ def verdict(site, ctx):
         text = r.get("type") or "Bathing restriction in force"
         if r.get("group") and r["group"].lower() not in text.lower():
             text += " — " + r["group"].lower()
-        level = raise_to("avoid") if any(w in (r.get("type") or "").lower()
-                                         for w in AVOID_WORDS) else raise_to("caution")
-        why.append({"t": "warning", "s": "Local authority notice", "text": text,
+        kind = (r.get("type") or "").lower()
+        if any(w in kind for w in ROI_PROHIBIT_WORDS):
+            level = raise_to("avoid")
+            why_t = "warning"
+        elif any(w in kind for w in ROI_ADVISORY_WORDS):
+            level = raise_to("advised")
+            why_t = "advised"
+        else:
+            level = raise_to("caution")
+            why_t = "warning"
+        why.append({"t": why_t, "s": "Local authority notice", "text": text,
                     "detail": r.get("detail"), "at": r.get("from"), "url": r.get("notice")})
 
     sc = ctx["sepa"].get(sid)
@@ -1475,10 +1497,18 @@ def verdict(site, ctx):
             why.append({"t": "warning", "s": "SEPA", "text": "Pollution incident reported",
                         "at": sc.get("at")})
         elif f == "poor":
+            # SEPA's own published position on a poor prediction is not "take
+            # care". It is: "We warn against bathing when poor water quality is
+            # predicted." This sat at caution — two rungs below where the
+            # identical regulatory state lands in England, where the EA's advice
+            # against bathing goes to `advised`. On the day this was checked
+            # SEPA predicted poor at 16 of its 30 beaches, and every one of them
+            # showed a milder word than the regulator was using.
             checked.append("SEPA's prediction for today")
-            level = raise_to("caution")
-            why.append({"t": "forecast", "s": "SEPA",
-                        "text": "Today's prediction: poor water quality", "at": sc.get("at")})
+            level = raise_to("advised")
+            why.append({"t": "advised", "s": "SEPA",
+                        "text": "Poor water quality predicted. SEPA advises "
+                                "against bathing today", "at": sc.get("at")})
         elif f in SEPA_CLEAR:
             checked.append("SEPA's prediction for today")
             why.append({"t": "clear", "s": "SEPA",
@@ -1634,9 +1664,22 @@ def verdict(site, ctx):
     # ---- 4. the standing rating --------------------------------------------
     # Never used to justify a green verdict — only ever to add a warning.
     if (site.get("cls") or "").lower().startswith("poor"):
-        level = raise_to("caution")
-        why.append({"t": "class", "s": "Annual classification",
-                    "text": "Rated Poor for %s" % (site.get("clsYear") or "the last season")})
+        # Article 12 of the revised Bathing Water Directive, which all five
+        # jurisdictions implement, requires advice against bathing to be given
+        # at a bathing water classified as Poor — and it stands for the whole
+        # following season. The Environment Agency says it plainly: "If water is
+        # classified as Poor, then the symbol for 'poor' together with advice
+        # against bathing will be displayed at the bathing water."
+        #
+        # So at these 39 beaches there is a sign saying exactly that, every day,
+        # and this site was saying "Take care". Somebody standing in front of
+        # the sign was reading a milder word on their phone than the one on the
+        # post beside them.
+        level = raise_to("advised")
+        why.append({"t": "advised", "s": "Annual classification",
+                    "text": "Rated Poor for %s, so advice against bathing is in "
+                            "place here for the season"
+                            % (site.get("clsYear") or "the last season")})
 
     # ---- 5. season and coverage --------------------------------------------
     if not in_season(country):
