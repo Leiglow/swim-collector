@@ -2050,11 +2050,27 @@ def main():
         site = by_id.get(sid)
         if not site:
             continue
-        why = ""
-        for w in (rec.get("why") or []):
-            if w.get("text"):
-                why = w["text"]
-                break
+        # THE REASON HAS TO BE THE WORST ONE, NOT THE FIRST ONE.
+        #
+        # This took whichever reason happened to come first and had text. For a
+        # beach that is clear on today's forecast but rated Poor, the reasons are
+        # [clear, advised] in that order — so the feed sent out "Blyth South
+        # Beach: Do not swim" with the body "No warnings in place", and did it
+        # for 23 of its 85 items. A warning headline over an all-clear body, in
+        # the one place people subscribe to precisely so they do not have to
+        # check for themselves.
+        #
+        # Same ordering the beach pages use, so the feed and the page can never
+        # lead with different reasons. And a `clear` entry can never be the
+        # reason a place is in this list at all, so it is excluded outright
+        # rather than merely ranked last.
+        ORDER = {"warning": 0, "advised": 1, "spill-now": 2, "spill-recent": 3,
+                 "forecast": 4, "class": 5, "rain": 6, "clear": 9}
+        picks = [w for w in (rec.get("why") or []) if w.get("text")]
+        if rec["v"] in ("avoid", "advised"):
+            picks = [w for w in picks if w.get("t") != "clear"] or picks
+        picks.sort(key=lambda w: ORDER.get(w.get("t"), 8))
+        why = picks[0]["text"] if picks else ""
         brief_sites[sid] = [rec["v"], why[:120]]
         if rec["v"] in ("avoid", "advised"):
             alerts.append({
