@@ -29,6 +29,10 @@ on:
         description: "Re-fetch rainfall and the forecast instead of carrying them forward"
         type: boolean
         default: false
+      push_test:
+        description: "Send a TEST notification to everyone subscribed (not a warning)"
+        type: boolean
+        default: false
 
 concurrency:
   # Two overlapping runs would both append to the same day's history key, and KV
@@ -94,7 +98,9 @@ jobs:
           # Rain is only re-fetched every three hours. This asks for it now,
           # which also refreshes the week ahead that rides along with it.
           if [ "${{ inputs.fresh_rain }}" = "true" ]; then FORCE="$FORCE --fresh-rain"; fi
-          python3 collect_swim.py --publish $FORCE
+          PUSHTEST=""
+          if [ "${{ inputs.push_test }}" = "true" ]; then PUSHTEST="--push-test"; fi
+          python3 collect_swim.py --publish $FORCE $PUSHTEST
 
       # A run that stood down writes no snapshot, so the summary below would
       # report the previous one as if it were fresh. Skip it in that case.

@@ -103,7 +103,8 @@ def _send(sub, payload, private_key, contact):
     )
 
 
-def run(previous_sites, current_sites, places, base_url=None, dry_run=False):
+def run(previous_sites, current_sites, places, base_url=None, dry_run=False,
+        test=False):
     """Send what needs sending. Returns a short summary for the run log.
 
     places: {site id: {"name": ..., "slug": ...}} — only for the wording and the
@@ -118,7 +119,12 @@ def run(previous_sites, current_sites, places, base_url=None, dry_run=False):
         return "push: VAPID_PRIVATE not set — nothing sent, which is correct " \
                "until the site has been switched on"
 
-    changed = newly_warned(previous_sites, current_sites)
+    # A way to prove delivery without waiting for a beach to actually turn bad.
+    # Worth having permanently, not just on the day this was built: "did the
+    # notifications stop working" is otherwise unanswerable except by waiting for
+    # a warning and seeing whether one arrives, which is the wrong way round on a
+    # safety site. Says plainly that it is a test, so nobody reads it as real.
+    changed = {} if test else newly_warned(previous_sites, current_sites)
 
     try:
         token = _token("swim-push")
@@ -134,14 +140,32 @@ def run(previous_sites, current_sites, places, base_url=None, dry_run=False):
     told = listing.get("told") or {}
     today = date.today().isoformat()
 
-    # One message a day per beach, however much it flaps.
-    fresh = {s: v for s, v in changed.items() if told.get(s) != today}
+    # One message a day per beach, however much it flaps. A test bypasses that,
+    # since the whole point of it is to arrive.
+    fresh = changed if test else {s: v for s, v in changed.items()
+                                  if told.get(s) != today}
 
     sent = gone = failed = 0
     dead = []
-    if fresh and not dry_run:
+    if (fresh or test) and not dry_run:
         for sub in subs:
             mine = [s for s in (sub.get("sites") or []) if s in fresh]
+            if test:
+                payload = {"title": "Test: notifications are working",
+                           "body": "This is a test, not a warning. Nothing is "
+                                   "wrong with any of your beaches.",
+                           "url": "/", "tag": "swim-test"}
+                try:
+                    _send(sub, payload, private_key, contact)
+                    sent += 1
+                except Exception as e:                # noqa: BLE001
+                    msg = str(e)
+                    if "404" in msg or "410" in msg:
+                        dead.append(sub.get("endpoint")); gone += 1
+                    else:
+                        failed += 1
+                        print("      test send failed: %s" % msg[:200])
+                continue
             if not mine:
                 continue
             first = mine[0]
@@ -180,6 +204,9 @@ def run(previous_sites, current_sites, places, base_url=None, dry_run=False):
         return ("push: sent %d but could not report back (%s)"
                 % (sent, str(e)[:100]))
 
+    if test:
+        return ("push TEST: %d sent, %d dead, %d failed, %d subscriptions"
+                % (sent, gone, failed, len(subs)))
     return ("push: %d newly warned, %d after the daily cap, %d sent, %d dead, "
             "%d failed, %d subscriptions"
             % (len(changed), len(fresh), sent, gone, failed, len(subs)))
