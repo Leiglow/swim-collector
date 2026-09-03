@@ -250,6 +250,95 @@ def sites_england():
     return out
 
 
+def sites_england_gone():
+    """The English bathing waters that were de-designated, and are still swum at.
+
+    THE SILENCE THIS BREAKS. "Designated bathing water" is a legal status, not a
+    list of where people swim, and a beach can be taken off it. When that
+    happens the Environment Agency's ordinary list endpoint stops returning it —
+    but the record stays live in the linked data, with its coordinates, the year
+    it went, and the EA's own reason in plain English. So these places simply
+    vanish from every map built off the normal feed, including this one, while
+    people carry on swimming there.
+
+    Four of the fourteen carry PERMANENT ADVICE AGAINST BATHING, which is the
+    strongest standing "do not swim here" the Environment Agency issues. The
+    worst of them for this site is Ilfracombe Wildersmouth: it sits between
+    Ilfracombe Tunnels and Ilfracombe Hele, both still designated and both
+    already on our map, so a visitor sees a pin either side of the harbour and
+    swims at the one in the middle that has no pin at all.
+
+    The Republic of Ireland already does this properly — the EPA keeps
+    de-classified beaches in the public beaches.ie feed as other monitored
+    waters, which is why Merrion Strand is already in our 240. This mirrors that
+    onto England's orphans.
+
+    These are NEVER given a water-quality verdict. Nobody samples them any more,
+    and that is the whole point: the page has to say that nobody is testing,
+    rather than leave a gap that reads as nothing to worry about.
+    """
+    ids = _dedesignated_ids()
+    if not ids:
+        print("    de-designated: none returned")
+        return []
+    out = []
+    for sid in ids:
+        try:
+            d = fetch_json("https://environment.data.gov.uk/doc/bathing-water/%s.json" % sid)
+            it = d["result"]["primaryTopic"]
+        except Exception as e:                      # noqa: BLE001
+            print("    de-designated %s failed: %s" % (sid, str(e)[:60]))
+            continue
+        sp = it.get("samplingPoint") or {}
+        ll = valid(sp.get("lat"), sp.get("long"))
+        if not ll:
+            continue
+        reason = lit(it.get("dedesignationReasonText")) or ""
+        year = year_from_uri({"year": it.get("yearDedesignated")}) \
+            or str(lit(it.get("yearDedesignated")) or "")[-4:]
+        out.append({
+            "id": "E:" + str(it.get("eubwidNotation") or sid),
+            "name": tidy_name(lit(it.get("name")) or sid),
+            "country": "England",
+            "lat": ll[0], "lon": ll[1],
+            # No classification and no year: it is not classified any more, and
+            # printing the last one it ever had would be presenting a grade from
+            # years ago as if it still meant something.
+            "cls": None, "clsYear": None,
+            "kind": _kind(type_from_uris(it.get("type"))),
+            "district": lit(it.get("district")),
+            "rainRisk": False,
+            "eaRegion": lit(it.get("regionalOrganization")),
+            "gone": year or True,
+            "goneWhy": reason,
+            # The four with a standing regulatory instruction not to swim, which
+            # is a different thing from merely being unmonitored and has to look
+            # different on the page.
+            "goneWarn": "permanent advice against bathing" in reason.lower(),
+            "url": "https://environment.data.gov.uk/bwq/profiles/profile.html?site=%s"
+                   % (it.get("eubwidNotation") or sid),
+        })
+    warn = sum(1 for x in out if x["goneWarn"])
+    print("    de-designated %4d sites (%d with permanent advice against bathing)"
+          % (len(out), warn))
+    return out
+
+
+def _dedesignated_ids():
+    """Ask the EA's SPARQL endpoint, because the list endpoint drops these."""
+    q = ("PREFIX bw: <http://environment.data.gov.uk/def/bathing-water/> "
+         "SELECT ?bw WHERE { ?bw a bw:BathingWater ; bw:yearDedesignated ?y } ORDER BY ?bw")
+    url = ("https://environment.data.gov.uk/sparql/bwq/query?"
+           + urllib.parse.urlencode({"query": q, "output": "json"}))
+    try:
+        d = fetch_json(url)
+    except Exception as e:                          # noqa: BLE001
+        print("    de-designated lookup failed: %s" % str(e)[:80])
+        return []
+    return [b["bw"]["value"].rstrip("/").split("/")[-1]
+            for b in d.get("results", {}).get("bindings", [])]
+
+
 def sites_wales():
     d = fetch_json(S.NRW_SITES)
     out = []
@@ -717,6 +806,26 @@ def main():
         "built": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
         "sites": sites,
     }, count=len(sites), force=force)
+
+    # Deliberately its own file rather than extra rows in sites.json. These are
+    # NOT bathing waters — every "941 bathing waters" count on the site would
+    # become a lie, and worse, one of them could pick up a green verdict from
+    # some consumer that had not heard of them. A separate file cannot do that.
+    print("Bathing waters that were de-designated")
+    try:
+        gone = sites_england_gone()
+        if gone:
+            add_slugs(gone)
+            places.add_nearby_towns(gone)
+            write(os.path.join(OUT, "gone.json"), {
+                "built": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+                "note": ("Bathing waters removed from the Environment Agency's "
+                         "register. Nobody samples these any more. Four carry "
+                         "permanent advice against bathing."),
+                "gone": gone,
+            }, count=len(gone), force=force)
+    except Exception as e:                          # noqa: BLE001
+        print("    FAILED: %s" % str(e)[:120])
 
     if quick:
         print("--quick: skipping outfalls")
