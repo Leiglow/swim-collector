@@ -494,6 +494,75 @@ def add_regions(sites):
         s.pop("eaRegion", None)
 
 
+# Towns near enough to be worth searching for, from places.json — GeoNames
+# populated places in Britain and Ireland with a population of 5,000 or more,
+# trimmed to those within 30km of at least one bathing water. CC BY 4.0.
+#
+# WHY THIS EXISTS. The search box matched a beach's own name, its town, its
+# district and its country, and nothing else — so it answered the question "is
+# there a beach CALLED this" when what people type is where they live. Searching
+# Plymouth returned three results; there are twenty-four bathing waters within
+# 25km of Plymouth, and Bovisand, four and a half kilometres away, was invisible
+# because its district is South Hams. Across seventeen towns and cities the
+# search found 55 places where 359 were within reach. Truro, Exeter, Edinburgh,
+# Newcastle and Liverpool each returned NOTHING.
+#
+# Naming the nearby towns on each site fixes it at build time, with no runtime
+# lookup, no geocoding service and no privacy cost: it is four extra words in a
+# file the page already fetches, about 7KB gzipped.
+PLACES = os.path.join(os.path.dirname(os.path.abspath(__file__)), "places.json")
+NEAR_TOWN_KM = 30.0        # a distance somebody would actually drive for a swim
+NEAR_TOWN_MAX = 4          # enough to catch the city and its neighbours
+
+
+def add_nearby_towns(sites):
+    """Name the towns each bathing water is near, so people can search for one.
+
+    Ranked by population, not distance: somebody typing a place name is far more
+    likely to mean the city than the hamlet next to it, and with only four slots
+    the city has to win. A town whose name is already inside the site's own name
+    is skipped, because it is findable already and would waste a slot.
+    """
+    try:
+        with io.open(PLACES, encoding="utf-8") as fh:
+            places = json.load(fh)
+    except Exception as e:                          # noqa: BLE001
+        print("    places.json unreadable (%s) — search will not know about towns" % e)
+        return
+
+    grid = {}
+    for name, lat, lon, pop in places:
+        grid.setdefault((round(lat), round(lon)), []).append((name, lat, lon, pop))
+
+    filled = 0
+    for s in sites:
+        lat, lon = s.get("lat"), s.get("lon")
+        if lat is None or lon is None:
+            continue
+        cand = []
+        for dla in (-1, 0, 1):
+            for dlo in (-1, 0, 1):
+                for name, tla, tlo, pop in grid.get((round(lat) + dla, round(lon) + dlo), []):
+                    d = haversine(lat, lon, tla, tlo)
+                    if d <= NEAR_TOWN_KM:
+                        cand.append((-pop, d, name))
+        cand.sort()
+        own = _slug(s["name"])
+        seen, picked = set(), []
+        for _pop, _d, name in cand:
+            key = _slug(name)
+            if not key or key in seen or key in own:
+                continue
+            seen.add(key)
+            picked.append(name)
+            if len(picked) >= NEAR_TOWN_MAX:
+                break
+        if picked:
+            s["near"] = " ".join(picked)
+            filled += 1
+    print("    named nearby towns on %d of %d sites" % (filled, len(sites)))
+
+
 def add_slugs(sites):
     """A stable, readable url for every beach.
 
@@ -705,6 +774,7 @@ def main():
     sites.sort(key=lambda s: (s["country"], s["name"]))
     add_regions(sites)
     add_slugs(sites)
+    add_nearby_towns(sites)
     if not quick:
         print("Classification history")
         try:
