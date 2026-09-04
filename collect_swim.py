@@ -2208,7 +2208,24 @@ def main():
         # half hour until somebody looks, while the readings themselves keep
         # flowing. A wording gap must never hold back a water quality warning.
         return 1
+
+    # Same shape, same reason: the site is current and the run is red until
+    # somebody looks. Last, so it cannot skip the notifications either — which
+    # is the other thing the old mid-publish raise was quietly doing.
+    if PUBLISH_PROBLEMS:
+        print()
+        print("!" * 70)
+        print("THE SITE IS PUBLISHED AND CURRENT, but the record behind it complained:")
+        for problem in PUBLISH_PROBLEMS:
+            print("    %s" % problem)
+        print("!" * 70)
+        return 1
     return 0
+
+
+# Health complaints from the publish endpoint, raised after everything has been
+# published rather than in the middle of it. See the note in publish().
+PUBLISH_PROBLEMS = []
 
 
 def publish(body, kind=None):
@@ -2238,10 +2255,25 @@ def publish(body, kind=None):
                 raise SystemExit("publish returned something that is not JSON: " + raw[:200])
             if res.get("ok") is not True:
                 raise SystemExit("publish rejected by the site: " + raw[:200])
+            # A COMPLAINT ABOUT THE RECORD IS NOT A REASON TO STOP PUBLISHING.
+            #
+            # These two used to raise from here, and this is called four times:
+            # once for the readings, then for the waterfall flow, the week ahead
+            # and the brief the edge injects into every beach page. So a
+            # complaint about the FIRST publish skipped the other three, and on
+            # 4 September that left the brief — and therefore the verdict served
+            # to crawlers and to readers with no JavaScript, and all 941 badge
+            # embeds — frozen for three hours while the readings themselves
+            # updated every fifteen minutes. The run was red the whole time and
+            # said nothing about the other three payloads.
+            #
+            # Collected here and raised by main() once everything is published,
+            # so the run still turns red and nothing goes stale to do it.
             # A history that has quietly stopped recording should turn the run red,
             # not sit in a log nobody reads.
             if res.get("historyNote") not in (None, "written"):
-                raise SystemExit("history not recorded: " + str(res.get("historyNote")))
+                PUBLISH_PROBLEMS.append("history not recorded: "
+                                        + str(res.get("historyNote")))
             # The same for the monthly rollup, which is the only form the record
             # will still be readable in a year — a Worker gets fifty subrequests
             # and 366 daily keys is not a request anybody can make.
@@ -2253,7 +2285,7 @@ def publish(body, kind=None):
             # red on 4 September when the endpoint started saying more than the
             # one word this test used to allow.
             if res.get("rollup") == "failed":
-                raise SystemExit("the monthly rollup did not record")
+                PUBLISH_PROBLEMS.append("the monthly rollup did not record")
             return
         except SystemExit:
             raise
