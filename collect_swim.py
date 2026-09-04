@@ -2092,6 +2092,18 @@ def main():
         "counts": dict(counts),
         "feeds": {k: v.as_dict() for k, v in feeds.items()},
         "sites": out,
+        # THE BRIEF RIDES WITH THE READINGS, so the two cannot describe
+        # different moments. It is the projection the edge injects into every
+        # beach page and the 941 badges read — the verdict a crawler sees, and a
+        # reader with no JavaScript. Sent only as its own publish, it could lag,
+        # and on 4 September it lagged by three and a half hours because the run
+        # failed on the first publish and skipped the rest. The separate
+        # kind=brief publish below still happens: this Worker and this collector
+        # deploy from different repositories, so one is always older than the
+        # other, and the endpoint accepts both.
+        # sites AND alerts: /swim/alerts.xml reads brief.alerts, and a brief
+        # written without them turns the whole feed into "no data yet".
+        "brief": {"sites": brief_sites, "alerts": alerts},
     }
     body = json.dumps(snapshot, separators=(",", ":"), ensure_ascii=False)
     io.open(os.path.join(OUT, LOCAL_SNAPSHOT), "w", encoding="utf-8").write(body)
