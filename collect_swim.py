@@ -2242,6 +2242,18 @@ def publish(body, kind=None):
             # not sit in a log nobody reads.
             if res.get("historyNote") not in (None, "written"):
                 raise SystemExit("history not recorded: " + str(res.get("historyNote")))
+            # The same for the monthly rollup, which is the only form the record
+            # will still be readable in a year — a Worker gets fifty subrequests
+            # and 366 daily keys is not a request anybody can make.
+            #
+            # Checked for the one value that means trouble rather than for the
+            # one that means success: it reports "written, repaired N day(s)"
+            # while it fills in the days before it existed, and a status field
+            # that fails on anything unexpected is exactly what turned every run
+            # red on 4 September when the endpoint started saying more than the
+            # one word this test used to allow.
+            if res.get("rollup") == "failed":
+                raise SystemExit("the monthly rollup did not record")
             return
         except SystemExit:
             raise
