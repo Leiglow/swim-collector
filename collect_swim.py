@@ -1606,6 +1606,25 @@ def verdict(site, ctx):
             continue
         if st is None:
             unknown_co.add(ctx["outfall_co"].get(key, "a water company"))
+            # RECORDED AS DARK, NOT DROPPED.
+            #
+            # A whole company's feed being unreadable used to delete every one
+            # of its outfalls from this list, and the beach then had no `of` key
+            # at all. Two things read that as good news. The beach page's map
+            # note prints "No monitored storm overflows within 2km of this
+            # beach" — on a page whose own checklist, two inches above, says the
+            # company's feed is down and whose JSON still carries outfalls:12,
+            # nearest 1.53km. And the fortnight strip, once the feed recovers,
+            # draws that day as a plain "checked, none recorded" green block,
+            # because ingest.js can only mark a day blind from an `of` list that
+            # is present and all dark.
+            #
+            # So the outfall goes in, marked off, which is the same word used
+            # for a monitor the company itself reports as not reporting. It is
+            # NOT added to `blind`: that list drives "N nearby overflow monitors
+            # not reporting", and unknown_co already says the same thing better,
+            # naming the company whose feed is down.
+            detail.append(_outfall_row(ctx, key, dist, "off"))
             continue
         if st["offline"]:
             blind.append((key, dist, st))
@@ -1744,7 +1763,11 @@ def verdict(site, ctx):
     detail.sort(key=lambda x: x[1])
     return {"level": level, "why": why, "checked": checked, "gaps": gaps,
             "now": len(now_list), "recent": len(recent_list),
-            "blind": len(blind), "near": near, "detail": detail}
+            "blind": len(blind), "near": near, "detail": detail,
+            # Outfalls carried through with no readable status, because the
+            # company's feed could not be read. Counted so a run says out loud
+            # how much of the coast it is describing from position alone.
+            "unreadable": len(unknown_co)}
 
 
 # ---------------------------------------------------------------------------
@@ -2070,8 +2093,11 @@ def main():
     # that are open to the sea, which is the flag the surfing list is built
     # from. Nothing adds surfWarned to avoid+advised.
     surf_warned = 0
+    unreadable_beaches = 0
     for s in sites:
         v = verdict(s, ctx)
+        if v.get("unreadable"):
+            unreadable_beaches += 1
         counts[v["level"]] += 1
         if v["level"] in ("avoid", "advised") and s.get("ocean"):
             surf_warned += 1
@@ -2098,6 +2124,13 @@ def main():
         print("    %-9s %4d" % (k, counts[k]))
     print("    %-9s %4d  (of the warned, those open to the ocean)"
           % ("surf", surf_warned))
+    # Said out loud, because it used to be invisible. These beaches have
+    # outfalls nearby whose status could not be read, and they are carried into
+    # the snapshot marked dark rather than dropped — dropping them made the
+    # beach page say there were none within 2km.
+    if unreadable_beaches:
+        print("    %-9s %4d  (beaches with a nearby outfall whose feed could not be read)"
+              % ("dark", unreadable_beaches))
 
     # A small payload for the two things that must not drag the full snapshot
     # around: the embeddable badge, which sits on somebody else's site, and the
