@@ -32,7 +32,11 @@ import urllib.request
 from datetime import date, datetime, timezone
 
 WARNED = ("avoid", "advised")
-WORD = {"avoid": "Do not swim today", "advised": "Advised against today"}
+# The regulator's own words, matching VERDICT in swim_site_assets.py exactly.
+# "Advised against today" was this file's own shorter phrasing, so a
+# notification renamed the band the rest of the site went out of its way to
+# preserve — and the page it links to then said something different.
+WORD = {"avoid": "Do not swim today", "advised": "Advice against bathing today"}
 
 CTX = ssl.create_default_context()
 TIMEOUT = 30
