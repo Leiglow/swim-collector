@@ -471,6 +471,12 @@ def sites_ni():
 
 
 def sites_roi():
+    # StatusTypeName carried through. 87 of the 240 Republic records are flagged
+    # "Non Identified" — the EPA samples them and publishes restriction notices,
+    # but they are not identified bathing waters — and the same 87 are the ones
+    # with no published latitude, which is why their coordinates come from an
+    # Irish Grid reference. Calling all 941 sites "designated" counted those 87
+    # as something their own regulator says they are not.
     d = fetch_json(S.ROI_SITES)
     out, dropped = [], 0
     for b in d.get("value", []):
@@ -492,6 +498,7 @@ def sites_roi():
             "id": "I:" + str(b.get("Code") or b.get("LocationId")),
             "name": tidy_name(b.get("Name") or "Unnamed"),
             "country": "Ireland",
+            "desig": b.get("StatusTypeName") != "Non Identified",
             "lat": ll[0], "lon": ll[1],
             "cls": _tidy_class(b.get("AnnualClassificationName")),
             "clsYear": b.get("AnnualClassificationYear"),
