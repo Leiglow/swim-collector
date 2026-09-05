@@ -109,7 +109,11 @@ if __name__ == "__main__":
         try:
             globals()[name]()
             print("  ok    %s" % name)
-        except AssertionError as e:
+        # Every exception, not only AssertionError. A test that raises a
+        # KeyError because the thing it looks for has been renamed is a failing
+        # test, and it used to kill the whole run instead of being reported —
+        # which on a run that gates a deploy is the wrong way round.
+        except Exception as e:                            # noqa: BLE001
             fails += 1
             print("  FAIL  %s  %s" % (name, str(e)[:200]))
     print("%d checked, %d failed" % (len(names), fails))
