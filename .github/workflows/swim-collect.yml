@@ -64,6 +64,12 @@ jobs:
       # arrives, which on this site reads as "nothing is wrong". That is not a
       # thing to hand-roll, so it uses the maintained library. Pinned, because a
       # surprise upgrade to the one piece of crypto here is not wanted at 04:00.
+      # Fast, offline, and ahead of the fetching. These are the rules that
+      # decide whether a beach is called clear; if one of them has been broken
+      # the right thing is to fail before publishing, not after.
+      - name: Check the verdict guards
+        run: python3 tests/test_verdicts.py
+
       - name: Install the push library
         run: python -m pip install --quiet "pywebpush==2.0.3"
 
