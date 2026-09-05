@@ -6,6 +6,7 @@ that has not earned one, which is the one failure this site exists to avoid.
 """
 
 import os
+import re
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -59,6 +60,35 @@ def test_merging_does_not_edit_the_feed_it_read():
     assert rows["TW:1"]["offline"] is False
 
 
+def test_every_reason_type_the_collector_emits_has_a_rank():
+    """The alerts feed sorts reasons by type, and an absent name is silent.
+
+    It ranked "spill-now", which nothing emits, and had no entry for "spill" —
+    a discharge happening now, and usually the reason the verdict is Do not
+    swim. It fell to the default and sorted below rain, so the feed published
+    "Do not swim" with a rainfall figure under it while the beach page led with
+    the sewage. Nothing failed; a name was simply missing.
+    """
+    src = open(os.path.join(os.path.dirname(os.path.dirname(
+        os.path.abspath(__file__))), "collect_swim.py"), encoding="utf-8").read()
+    block = src.split("WHY_ORDER = {", 1)[1].split("}", 1)[0]
+    ranked = set(re.findall(r'"([a-z-]+)"', block))
+    missing = m.KNOWN_WHY_TYPES - ranked
+    assert not missing, "no rank for %s" % sorted(missing)
+    invented = ranked - m.KNOWN_WHY_TYPES
+    assert not invented, "ranks a type nothing emits: %s" % sorted(invented)
+
+
+def test_a_discharge_now_outranks_rain():
+    """The specific pairing that was wrong, in the order the feed applies."""
+    src = open(os.path.join(os.path.dirname(os.path.dirname(
+        os.path.abspath(__file__))), "collect_swim.py"), encoding="utf-8").read()
+    block = src.split("WHY_ORDER = {", 1)[1].split("}", 1)[0]
+    order = dict((k, int(v)) for k, v in re.findall(r'"([a-z-]+)":\s*(\d+)', block))
+    assert order["spill"] < order["rain"], order
+    assert order["warning"] < order["spill"], order
+
+
 def test_a_dead_monitor_is_never_counted_as_not_discharging():
     """state()'s own promise, in one line."""
     off = m.state(False, None, None, offline=True)
@@ -73,7 +103,11 @@ if __name__ == "__main__":
         try:
             fn()
             print("  ok    %s" % name)
-        except AssertionError as e:
+        # Every exception, not only AssertionError. A test that raises a
+        # KeyError because the thing it looks for has been renamed is a failing
+        # test, and it used to kill the whole run instead of being reported —
+        # which on a run that gates a deploy is the wrong way round.
+        except Exception as e:                            # noqa: BLE001
             fails += 1
             print("  FAIL  %s  %s" % (name, e))
     print("%d checked, %d failed" % (

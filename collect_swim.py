@@ -2123,8 +2123,26 @@ def main():
         # lead with different reasons. And a `clear` entry can never be the
         # reason a place is in this list at all, so it is excluded outright
         # rather than merely ranked last.
-        ORDER = {"warning": 0, "advised": 1, "spill-now": 2, "spill-recent": 3,
-                 "forecast": 4, "class": 5, "rain": 6, "clear": 9}
+        # THE NAMES HAVE TO BE THE ONES ACTUALLY EMITTED.
+        #
+        # This ranked "spill-now", which nothing has ever produced, and had no
+        # entry for "spill", which is the live one — an overflow discharging
+        # within 2km right now, and usually the very thing that set the verdict
+        # to Do not swim. So it fell to the default 8, below rain at 6, and the
+        # feed published "Do not swim" with "14.2mm of rain here in the last 24
+        # hours" underneath it while the beach page led with the sewage. The one
+        # place people subscribe to precisely so they do not have to check.
+        #
+        # Checked against KNOWN_WHY_TYPES below rather than trusted, because a
+        # name that is merely absent produces exactly this and says nothing.
+        WHY_ORDER = {"warning": 0, "advised": 1, "spill": 2, "spill-recent": 3,
+                     "forecast": 4, "class": 5, "rain": 6, "spill-far": 7,
+                     "clear": 9}
+        missing = sorted(KNOWN_WHY_TYPES - set(WHY_ORDER))
+        if missing:
+            print("    WARNING: no rank for reason type(s) %s — they will sort "
+                  "below rain in the alerts feed" % ", ".join(missing))
+        ORDER = WHY_ORDER
         picks = [w for w in (rec.get("why") or []) if w.get("text")]
         if rec["v"] in ("avoid", "advised"):
             picks = [w for w in picks if w.get("t") != "clear"] or picks
