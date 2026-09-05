@@ -504,7 +504,19 @@ def sites_roi():
             "clsYear": b.get("AnnualClassificationYear"),
             "kind": "Coastal",
             "district": b.get("CountyName"),
-            "rainRisk": False,
+            # READ, NOT ASSUMED. This was hardcoded False for all 240, which
+            # said no Irish beach is affected by heavy rain — while the EPA
+            # publishes the answer per beach and says 143 of the 153 designated
+            # ones are. The effect was live: rainRisk is what lets a day of
+            # heavy rain raise a verdict to "take care" on its own, and the
+            # Republic has no storm overflow data to raise it any other way, so
+            # those beaches sat green through a downpour.
+            #
+            # STPRisk is null on exactly the 87 "Non Identified" beaches and on
+            # no others — places the EPA does not assess for short-term
+            # pollution at all. That is "not assessed" rather than "unknown",
+            # so it stays False rather than being guessed either way.
+            "rainRisk": b.get("STPRisk") is True,
             "url": b.get("ProfileUrl") or None,
         })
     if dropped:
