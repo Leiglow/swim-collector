@@ -2016,9 +2016,24 @@ def main():
 
     print("Verdicts")
     out, counts = {}, defaultdict(int)
+    # How many of the warned places are surf beaches.
+    #
+    # The site's nav carries two badges — one on Swimming, one on Surfing — and
+    # the second needs a number that only something holding the register can
+    # work out. Every page fetches this snapshot; almost none of them fetch the
+    # 381KB register, and pulling it just to number a nav item is the trade the
+    # site refuses everywhere else. So it is counted here, once, beside the
+    # tallies that are already being made.
+    #
+    # A SUBSET, never a second total: `ocean` marks the 352 of these same 941
+    # that are open to the sea, which is the flag the surfing list is built
+    # from. Nothing adds surfWarned to avoid+advised.
+    surf_warned = 0
     for s in sites:
         v = verdict(s, ctx)
         counts[v["level"]] += 1
+        if v["level"] in ("avoid", "advised") and s.get("ocean"):
+            surf_warned += 1
         rec = {"v": v["level"], "why": v["why"]}
         for k, val in (("ck", v["checked"]), ("gaps", v["gaps"]), ("now", v["now"]),
                        ("recent", v["recent"]), ("blind", v["blind"])):
@@ -2037,8 +2052,11 @@ def main():
             rec["ni"] = n["indicator"]
             rec["niAt"] = n.get("at")
         out[s["id"]] = rec
+    counts["surfWarned"] = surf_warned
     for k in ("avoid", "advised", "caution", "unknown", "ok"):
         print("    %-9s %4d" % (k, counts[k]))
+    print("    %-9s %4d  (of the warned, those open to the ocean)"
+          % ("surf", surf_warned))
 
     # A small payload for the two things that must not drag the full snapshot
     # around: the embeddable badge, which sits on somebody else's site, and the
