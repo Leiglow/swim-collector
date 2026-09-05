@@ -494,6 +494,38 @@ def spills_common(company, url, feed):
     return out
 
 
+def merge_spills(spills, got, feed):
+    """Fold one company's outfalls in, honouring whether its feed is healthy.
+
+    A FEED THAT HAS STOPPED PUBLISHING IS NOT A COAST WITH NOTHING TO REPORT.
+    stale_check marks a feed unhealthy when nothing in it has been restamped
+    for hours, but the rows still arrived and still say "Status: 0". Folded in
+    unchanged they read as monitors that looked and found nothing, a beach
+    counts them under "3 monitored storm overflows within 2km", and that alone
+    is enough for a green verdict. A hundred and seven places have that feed as
+    their only check, so the green would rest entirely on data this run has
+    already judged dead — while the banner at the top of the same page says
+    those beaches are shown as "can't say".
+
+    So every row from an unhealthy feed comes in marked offline, which is the
+    site's own existing word for "we looked and the monitor was not reporting".
+    It stops the row counting as a check and raises the verdict to unknown.
+
+    What it does NOT do is throw the rows away. A stale feed can still be the
+    only record of a discharge that started before it went quiet, and losing a
+    warning is a worse failure than refusing a green tick.
+    """
+    if not got:
+        return
+    if feed.ok:
+        spills.update(got)
+        return
+    for k, v in got.items():
+        v = dict(v)
+        v["offline"] = True
+        spills[k] = v
+
+
 def stale_check(feed, hours=8):
     """Mark a feed unhealthy if NOTHING in it has been updated recently.
 
@@ -1580,7 +1612,16 @@ def verdict(site, ctx):
             # A release the company has logged but not yet verified is both
             # unreadable AND a reported discharge. Counting it only as a dead
             # monitor would lose the discharge entirely.
-            if st["recent"]:
+            #
+            # "now" as well as "recent", which this missed. It could not happen
+            # while offline meant Status:-1 — a monitor cannot report -1 and 1
+            # at once — but it can now that a stale feed marks its rows offline
+            # while they still carry the discharge they were reporting when the
+            # publisher went quiet. That is exactly the case where losing it
+            # would matter most.
+            if st["now"]:
+                now_list.append((key, dist, st))
+            elif st["recent"]:
                 recent_list.append((key, dist, st))
             detail.append(_outfall_row(ctx, key, dist, "off"))
             continue
@@ -1902,14 +1943,14 @@ def main():
     for company, url in S.EDM_FEEDS.items():
         got = run(company, lambda f, c=company, u=url: spills_common(c, u, f))
         if got:
-            spills.update(got)
+            merge_spills(spills, got, feeds[company])
             print("    %-26s %5d outfalls, %d discharging, %d offline"
                   % (company, feeds[company].count, feeds[company].spilling,
                      feeds[company].offline))
 
     got = run("Southern Water", spills_southern)
     if got:
-        spills.update(got)
+        merge_spills(spills, got, feeds["Southern Water"])
         print("    %-26s %5d outfalls, %d discharging, %d unverified"
               % ("Southern Water", feeds["Southern Water"].count,
                  feeds["Southern Water"].spilling, feeds["Southern Water"].offline))
@@ -1918,13 +1959,13 @@ def main():
     dcww_links = {}
     if wales:
         got, dcww_links = wales
-        spills.update(got)
+        merge_spills(spills, got, feeds["Welsh Water"])
         print("    %-26s %5d outfalls, %d discharging"
               % ("Welsh Water", feeds["Welsh Water"].count, feeds["Welsh Water"].spilling))
 
     got = run("Scottish Water", spills_scotland)
     if got:
-        spills.update(got)
+        merge_spills(spills, got, feeds["Scottish Water"])
         print("    %-26s %5d outfalls, %d discharging, %d no data"
               % ("Scottish Water", feeds["Scottish Water"].count,
                  feeds["Scottish Water"].spilling, feeds["Scottish Water"].offline))
