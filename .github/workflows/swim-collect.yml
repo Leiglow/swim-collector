@@ -68,7 +68,9 @@ jobs:
       # decide whether a beach is called clear; if one of them has been broken
       # the right thing is to fail before publishing, not after.
       - name: Check the verdict guards
-        run: python3 tests/test_verdicts.py
+        run: |
+          python3 tests/test_verdicts.py
+          python3 tests/test_push.py
 
       - name: Install the push library
         run: python -m pip install --quiet "pywebpush==2.0.3"

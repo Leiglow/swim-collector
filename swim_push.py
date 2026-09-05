@@ -174,15 +174,32 @@ def run(previous_sites, current_sites, places, base_url=None, dry_run=False,
 
     subs = listing.get("subscriptions") or []
     told = listing.get("told") or {}
+    # Warnings that were owed on an earlier run and could not be delivered — a
+    # push service 500, a timeout. They are carried forward rather than lost,
+    # because nothing downstream would ever notice them again: the next run sees
+    # the beach warned in both snapshots, so newly_warned() reports no
+    # transition at all.
+    owed = listing.get("owed") or {}
     today = date.today().isoformat()
 
     # One message a day per beach, however much it flaps. A test bypasses that,
     # since the whole point of it is to arrive.
+    if not test:
+        for sid, entry in owed.items():
+            if sid in changed or told.get(sid) == today:
+                continue
+            v = (entry or {}).get("v") if isinstance(entry, dict) else entry
+            # Only if it is STILL warned. A beach that has since gone clear does
+            # not want a notification about a warning that is over.
+            now_v = (current_sites or {}).get(sid)
+            if v and now_v and now_v.get("v") == v:
+                changed[sid] = v
     fresh = changed if test else {s: v for s, v in changed.items()
                                   if told.get(s) != today}
 
     sent = gone = failed = 0
     dead = []
+    delivered = set()
     if (fresh or test) and not dry_run:
         for sub in subs:
             mine = [s for s in (sub.get("sites") or []) if s in fresh]
@@ -220,21 +237,45 @@ def run(previous_sites, current_sites, places, base_url=None, dry_run=False,
             try:
                 _send(sub, payload, private_key, contact)
                 sent += 1
+                # These beaches really were told. Only these.
+                for sid in mine:
+                    delivered.add(sid)
             except Exception as e:                        # noqa: BLE001
                 msg = str(e)
                 # 404 and 410 mean the browser threw the subscription away.
+                # The subscription is gone, so nobody was owed anything: there
+                # is no phone left to tell.
                 if "404" in msg or "410" in msg:
                     dead.append(sub.get("endpoint"))
                     gone += 1
+                    for sid in mine:
+                        delivered.add(sid)
                 else:
                     failed += 1
 
+    # A BEACH IS ONLY "TOLD" IF SOMETHING ACTUALLY WENT.
+    #
+    # This marked every freshly warned beach told whatever happened, so a send
+    # that failed suppressed its own warning twice: told stops it being resent
+    # today, and the next run sees no transition because the beach is warned in
+    # both snapshots. The message was never retried and nothing recorded that it
+    # had not arrived.
+    now = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
     for s in fresh:
-        told[s] = today
+        if s in delivered:
+            told[s] = today
+            owed.pop(s, None)
+        else:
+            owed[s] = {"v": fresh[s], "at": now}
+    # Anything owed that has now been delivered, or has gone clear, is settled.
+    for sid in list(owed):
+        cur = (current_sites or {}).get(sid) or {}
+        if sid in delivered or cur.get("v") != (owed[sid] or {}).get("v"):
+            owed.pop(sid, None)
 
     try:
         _api(base, token, method="POST",
-             body={"told": told, "sent": sent, "gone": gone,
+             body={"told": told, "owed": owed, "sent": sent, "gone": gone,
                    "dead": [d for d in dead if d]})
     except Exception as e:                                # noqa: BLE001
         return ("push: sent %d but could not report back (%s)"
@@ -244,5 +285,5 @@ def run(previous_sites, current_sites, places, base_url=None, dry_run=False,
         return ("push TEST: %d sent, %d dead, %d failed, %d subscriptions"
                 % (sent, gone, failed, len(subs)))
     return ("push: %d newly warned, %d after the daily cap, %d sent, %d dead, "
-            "%d failed, %d subscriptions"
-            % (len(changed), len(fresh), sent, gone, failed, len(subs)))
+            "%d failed, %d owed and carried forward, %d subscriptions"
+            % (len(changed), len(fresh), sent, gone, failed, len(owed), len(subs)))
