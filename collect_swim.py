@@ -1475,7 +1475,16 @@ def verdict(site, ctx):
             gaps.append("%s does not publish a daily pollution risk forecast for "
                         "this beach" % AUTHORITY.get(country, "The regulator"))
     if p:
-        checked.append("Today's official pollution forecast")
+        # NOT "TODAY'S" WHEN IT IS YESTERDAY'S. prf() falls back a day when the
+        # relay has no document for today — an overnight case its own docstring
+        # describes — and records that on the feed as partial. The checklist
+        # never looked, so every English beach showed a green tick reading
+        # "Today's official pollution forecast" above a forecast issued the day
+        # before. Standard 3: date everything, including a tick.
+        fed = ctx["feeds"].get(FORECAST_FEED.get(country) or "")
+        stale_prf = bool(fed and fed.partial and "yesterday" in fed.partial)
+        checked.append("Yesterday's official pollution forecast, today's not published yet"
+                       if stale_prf else "Today's official pollution forecast")
         comment = (p.get("comment") or "").lower()
         if any(w in comment for w in AVOID_WORDS):
             # The daily forecast, not an incident: the Environment Agency and NRW
@@ -1731,7 +1740,12 @@ def verdict(site, ctx):
                 level = raise_to("caution")
             why.append({"t": "rain", "s": "Open-Meteo — modelled, not measured",
                         "text": "%.1fmm of rain here in the last 24 hours" % rain["h24"]})
-    elif not ctx["feeds"]["Rainfall"].ok:
+    else:
+        # NO READING IS NO READING, whether or not the FEED was healthy.
+        # rainfall() marks itself ok at up to 5% loss — 47 beaches of 941 — so
+        # this branch stayed silent for a beach whose own block was missing
+        # while the round as a whole passed. The reader sees no rain figure and
+        # is told nothing about why it is absent.
         gaps.append("Rainfall could not be checked for this beach")
 
     # ---- 4. the standing rating --------------------------------------------
@@ -1774,6 +1788,21 @@ def verdict(site, ctx):
         level = "unknown"
 
     detail.sort(key=lambda x: x[1])
+
+    # TODAY'S FAILURE BEFORE THE STANDING FACT.
+    #
+    # gaps were emitted in append order, and the permanent Ireland and Northern
+    # Ireland boilerplate — "no storm overflow data is published in the
+    # Republic" — is appended in section 2, while the gap that reports an actual
+    # failure today is appended in section 5. A list card shows gaps[0]. So on
+    # the day the EPA feed went down, all 240 Irish cards read exactly what they
+    # read on a healthy day, and the one new thing was pushed out of sight.
+    def _urgency(g):
+        return (0 if ("could not be fetched" in g or "feed is down" in g
+                      or "not reporting" in g) else
+                1 if g.startswith("Out of bathing season") else 2)
+    gaps.sort(key=_urgency)
+
     return {"level": level, "why": why, "checked": checked, "gaps": gaps,
             "now": len(now_list), "recent": len(recent_list),
             "blind": len(blind), "near": near, "detail": detail,
