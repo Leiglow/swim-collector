@@ -1461,6 +1461,19 @@ def verdict(site, ctx):
 
     # ---- 1. official warnings ----------------------------------------------
     p = ctx["prf"].get(sid)
+    # A BEACH THE FORECAST DOES NOT COVER IS NOT A BEACH WITH NOTHING TO SAY.
+    #
+    # Scotland has had a counterpart to this since the beginning — "SEPA does
+    # not publish a daily prediction for this beach" — and England and Wales
+    # had none, so 62 beaches outside the EA and NRW forecast lists produced no
+    # reason, no gap and no checklist line: a "Can't say" with a blank space
+    # where the explanation goes. Only claimed when the feed itself was read,
+    # or the gate further down reports the outage instead.
+    if not p and country in ("England", "Wales"):
+        feed = FORECAST_FEED.get(country)
+        if feed and ctx["feeds"].get(feed) and ctx["feeds"][feed].ok:
+            gaps.append("%s does not publish a daily pollution risk forecast for "
+                        "this beach" % AUTHORITY.get(country, "The regulator"))
     if p:
         checked.append("Today's official pollution forecast")
         comment = (p.get("comment") or "").lower()
@@ -1823,11 +1836,25 @@ def previous_sites():
     """
     url = os.environ.get("SWIM_INGEST_URL", "").replace("/ingest", "/data")
     if not url:
+        print("    push: no ingest URL, so no previous state and no warnings "
+              "will be announced this run")
         return None
     try:
-        return (fetch_json(url, tries=1, timeout=25) or {}).get("sites")
-    except Exception:                               # noqa: BLE001
+        was = (fetch_json(url, tries=1, timeout=25) or {}).get("sites")
+    except Exception as e:                          # noqa: BLE001
+        # SILENTLY is the word that was wrong. Announcing nothing is the right
+        # BEHAVIOUR — the alternative is telling everybody about every warned
+        # beach in the country the first time this fails and recovers — but the
+        # run went on to write a healthy heartbeat with no trace that a whole
+        # notification round had been skipped. A quiet run and a run that could
+        # not look are not the same thing, and nothing could tell them apart.
+        print("    push: could not read the published snapshot (%s), so no "
+              "warnings will be announced this run" % str(e)[:120])
         return None
+    if not was:
+        print("    push: the published snapshot carried no sites, so no "
+              "warnings will be announced this run")
+    return was
 
 
 def previous_falls():

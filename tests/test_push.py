@@ -75,6 +75,30 @@ def test_a_delivered_send_is_told_and_owes_nothing():
     assert "E:1" not in (posted.get("owed") or {}), posted
 
 
+def test_one_subscriber_success_does_not_cancel_another_subscriber_warning():
+    """The bug: `delivered` was a set of BEACH ids, added to inside the
+    per-subscription loop, so the first phone that accepted a warning marked
+    that beach told for everybody — and the person whose send failed never got
+    it, on this run or any later one."""
+    two = [SUB, {"endpoint": "https://push.example/2", "sites": ["E:1"],
+                 "keys": {"p256dh": "k", "auth": "a"}}]
+    posted = run({}, ["ok", "boom 500"],
+                 {"subscriptions": two, "told": {}, "owed": {}}, PREV, NOW)
+    assert "E:1" not in (posted.get("told") or {}), posted
+    assert "E:1" in (posted.get("owed") or {}), posted
+
+
+def test_a_dead_subscription_does_not_hold_a_warning_open():
+    """404/410 means the browser threw the subscription away, so there is no
+    phone left to owe. One live success plus one dead endpoint is delivered."""
+    two = [SUB, {"endpoint": "https://push.example/2", "sites": ["E:1"],
+                 "keys": {"p256dh": "k", "auth": "a"}}]
+    posted = run({}, ["ok", "410 gone"],
+                 {"subscriptions": two, "told": {}, "owed": {}}, PREV, NOW)
+    assert "E:1" in (posted.get("told") or {}), posted
+    assert "E:1" not in (posted.get("owed") or {}), posted
+
+
 def test_an_owed_warning_is_retried_while_the_beach_is_still_warned():
     """No transition to find on the next run — that is the whole point of owed."""
     owed = {"E:1": {"v": "avoid", "at": "2026-09-05T09:00:00Z"}}

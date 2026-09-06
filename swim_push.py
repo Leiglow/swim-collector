@@ -199,14 +199,36 @@ def run(previous_sites, current_sites, places, base_url=None, dry_run=False,
 
     sent = gone = failed = 0
     dead = []
+    # PER SUBSCRIPTION AND SITE, NOT PER SITE.
+    #
+    # `delivered` was a set of beach ids, added to inside the per-subscription
+    # loop — so one person's phone accepting the warning marked that beach told
+    # for everybody, and the subscriber whose send failed never got it. Not on
+    # the retry, either: told stops it being resent, and the next run sees no
+    # transition because the beach is warned in both snapshots. A warning owed
+    # to one person, cancelled by a message sent to another.
+    #
+    # Counted instead: how many live subscriptions wanted each beach, and how
+    # many actually received it. Delivered means all of them.
+    wanted = {}
+    got = {}
     delivered = set()
     if (fresh or test) and not dry_run:
         for sub in subs:
             mine = [s for s in (sub.get("sites") or []) if s in fresh]
+            for sid in mine:
+                wanted[sid] = wanted.get(sid, 0) + 1
             if test:
+                # A TEST HAS NOT LOOKED AT ANYTHING. In test mode `changed`
+                # is {} and this run never reads a single verdict, yet the body
+                # told every subscriber "Nothing is wrong with any of your
+                # beaches" — an all-clear about water nobody checked, pushed to
+                # a phone. The one message on this site that arrives without
+                # being asked for, and it was the least entitled to say that.
                 payload = {"title": "Test: notifications are working",
-                           "body": "This is a test, not a warning. Nothing is "
-                                   "wrong with any of your beaches.",
+                           "body": "This is a test, not a warning. It says "
+                                   "nothing about your beaches \u2014 open the "
+                                   "site to see how they are.",
                            "url": "/", "tag": "swim-test"}
                 try:
                     _send(sub, payload, private_key, contact)
@@ -237,9 +259,9 @@ def run(previous_sites, current_sites, places, base_url=None, dry_run=False,
             try:
                 _send(sub, payload, private_key, contact)
                 sent += 1
-                # These beaches really were told. Only these.
+                # This subscription was told. Only this one.
                 for sid in mine:
-                    delivered.add(sid)
+                    got[sid] = got.get(sid, 0) + 1
             except Exception as e:                        # noqa: BLE001
                 msg = str(e)
                 # 404 and 410 mean the browser threw the subscription away.
@@ -248,8 +270,9 @@ def run(previous_sites, current_sites, places, base_url=None, dry_run=False,
                 if "404" in msg or "410" in msg:
                     dead.append(sub.get("endpoint"))
                     gone += 1
+                    # No phone left to tell, so this subscription owes nothing.
                     for sid in mine:
-                        delivered.add(sid)
+                        got[sid] = got.get(sid, 0) + 1
                 else:
                     failed += 1
 
@@ -260,6 +283,8 @@ def run(previous_sites, current_sites, places, base_url=None, dry_run=False,
     # today, and the next run sees no transition because the beach is warned in
     # both snapshots. The message was never retried and nothing recorded that it
     # had not arrived.
+    # Told only where every subscription that wanted it received it.
+    delivered = {sid for sid, n in wanted.items() if got.get(sid, 0) >= n}
     now = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
     for s in fresh:
         if s in delivered:
