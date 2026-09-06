@@ -1125,6 +1125,19 @@ def sea_temperature(sites, feed, previous=None):
     # to appear, which is no way to check it worked.
     if "--fresh-rain" in sys.argv:
         previous = None
+
+    # THE DENOMINATOR IS CELLS, NOT BEACHES. The sea is asked for once per grid
+    # cell and stored per cell, so comparing a cell count against 898 coastal
+    # sites is a bar nothing can clear — the coverage test I added last round
+    # marked the feed unhealthy on every carry-forward, for ever. Built here, in
+    # front of the carry-forward, so both paths measure the same thing.
+    cells = {}
+    for s in sites:
+        if (s.get("kind") or "") not in SEA_KINDS:
+            continue
+        cells.setdefault((round(s["lat"] / SEA_GRID), round(s["lon"] / SEA_GRID)), []).append(s)
+    keys = list(cells.keys())
+
     if previous and previous.get("seaAt"):
         when = parse_iso(previous["seaAt"])
         age = hours_since(when)
@@ -1135,20 +1148,14 @@ def sea_temperature(sites, feed, previous=None):
             # ok unconditionally, so a short set published once was carried
             # forward as healthy every twelve hours until a fresh read replaced
             # it. Coastal sites only, because those are the only ones asked.
-            want = sum(1 for x in sites if (x.get("kind") or "") in SEA_KINDS)
+            want = len(keys)
             enough = len(previous["sea"]) >= want * 0.95 if want else True
             feed.ok, feed.count, feed.at = enough, len(previous["sea"]), when
             note = "carried forward, %d minutes old" % int(age * 60)
             feed.partial = note if enough else (
-                note + ", and %d of %d beaches" % (len(previous["sea"]), want))
+                note + ", and %d of %d sea cells" % (len(previous["sea"]), want))
             return previous["sea"], when
 
-    cells = {}
-    for s in sites:
-        if (s.get("kind") or "") not in SEA_KINDS:
-            continue
-        cells.setdefault((round(s["lat"] / SEA_GRID), round(s["lon"] / SEA_GRID)), []).append(s)
-    keys = list(cells.keys())
     batches = [keys[i:i + S.OPEN_METEO_BATCH]
                for i in range(0, len(keys), S.OPEN_METEO_BATCH)]
 
@@ -2370,11 +2377,26 @@ def main():
         # comparison would be against the readings we are about to publish.
         was = previous_sites()
 
+        # THE READINGS ARE PUBLISHED FIRST AND ALONE. publish() raises on a
+        # non-200, and these ran in a bare sequence — so a failure publishing
+        # the WATERFALL flow or the WEEK forecast, neither of which any warning
+        # depends on, threw before the notification block below and cancelled
+        # the whole round. Those warnings are then lost for good: `told` is
+        # never written, but the next run compares against a snapshot that
+        # already carries the warning, so there is no transition left to find.
+        #
+        # A secondary publish failing is worth reporting and worth continuing
+        # past. The site shows a stale forecast; nobody misses a warning.
         publish(body)
-        if falls_body:
-            publish(falls_body, kind="falls")
-        if week_body:
-            publish(week_body, kind="week")
+        for label, payload, kind in (("waterfall flow", falls_body, "falls"),
+                                     ("week forecast", week_body, "week")):
+            if not payload:
+                continue
+            try:
+                publish(payload, kind=kind)
+            except Exception as e:                  # noqa: BLE001
+                print("    %s did not publish (%s) — carrying on so the warnings "
+                      "still go out" % (label, str(e)[:120]))
         publish(brief_body, kind="brief")
 
         # Tell anybody who asked to be told. After publishing, so a beach named
