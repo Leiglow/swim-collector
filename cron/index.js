@@ -95,8 +95,16 @@ async function lastRunMinutes(env) {
     }
     return {minutes: (Date.now() - t) / 60000, read: "ok"};
   } catch (e) {
-    // cannot tell — treat as due rather than skip
-    return {minutes: null, read: "could not reach github"};
+    // cannot tell — treat as due rather than skip.
+    //
+    // The try above spans the fetch, the header reads AND r.json(), so a
+    // malformed body was reported on the public health endpoint as "could not
+    // reach github" — sending whoever reads it to check the network when the
+    // network was fine. Say which it was.
+    return {minutes: null,
+            read: (e && e.name === "SyntaxError")
+              ? "github answered with something this worker could not parse"
+              : "could not reach github: " + ((e && e.message) || "unknown")};
   }
 }
 
