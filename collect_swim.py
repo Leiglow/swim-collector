@@ -245,6 +245,12 @@ def via_proxy(url):
 
 
 def fetch(url, tries=3, timeout=90, backoff=2):
+    # KEYED BY THE URL THE CALLER ASKED FOR, not the one we went through.
+    # via_proxy rewrites `url` to the relay's address, and RELAY_AGE was stored
+    # under that — while note_relay_age() looks it up by the original. The two
+    # never matched, so the staleness guard has never once fired: a relayed copy
+    # could be any age at all and the feed still reported healthy and current.
+    asked = url
     url, token = via_proxy(url)
     last = None
     for attempt in range(tries):
@@ -264,7 +270,8 @@ def fetch(url, tries=3, timeout=90, backoff=2):
                 age = r.headers.get("X-Data-Age-Seconds")
                 if age is not None:
                     try:
-                        RELAY_AGE[url] = (int(age), r.headers.get("X-Data-Fetched-At"))
+                        RELAY_AGE[asked] = (int(age),
+                                            r.headers.get("X-Data-Fetched-At"))
                     except ValueError:
                         pass
                 return raw
@@ -726,7 +733,13 @@ def note_relay_age(feed, url, stale_hours=20):
         feed.error = ("the UK-side copy is %.0f hours old — it refreshes when the "
                       "site is viewed from the UK" % hours)
     elif hours > 1:
-        feed.partial = "from a copy %.0f hours old" % hours
+        # DO NOT CLOBBER A PARTIAL THAT MEANS SOMETHING ELSE. prf() records
+        # "using yesterday's forecast" here, and this overwrote it — which is
+        # exactly what the beach checklist reads to decide whether to say
+        # "Today's official pollution forecast" or yesterday's. The relay age
+        # and the forecast day are two different facts about the same document.
+        age_note = "from a copy %.0f hours old" % hours
+        feed.partial = (feed.partial + ", " + age_note) if feed.partial else age_note
 
 
 def prf(feed, url=None, prefix="E:"):
@@ -1116,8 +1129,18 @@ def sea_temperature(sites, feed, previous=None):
         when = parse_iso(previous["seaAt"])
         age = hours_since(when)
         if age is not None and 0 <= age * 60 < SEA_MAX_AGE_MIN and previous.get("sea"):
-            feed.ok, feed.count, feed.at = True, len(previous["sea"]), when
-            feed.partial = "carried forward, %d minutes old" % int(age * 60)
+            # THE SAME COVERAGE BAR A FRESH FETCH HAS TO CLEAR. Rainfall's
+            # carry-forward re-applies one and says why — "carrying forward must
+            # not launder a partial set into a healthy one" — and this one set
+            # ok unconditionally, so a short set published once was carried
+            # forward as healthy every twelve hours until a fresh read replaced
+            # it. Coastal sites only, because those are the only ones asked.
+            want = sum(1 for x in sites if (x.get("kind") or "") in SEA_KINDS)
+            enough = len(previous["sea"]) >= want * 0.95 if want else True
+            feed.ok, feed.count, feed.at = enough, len(previous["sea"]), when
+            note = "carried forward, %d minutes old" % int(age * 60)
+            feed.partial = note if enough else (
+                note + ", and %d of %d beaches" % (len(previous["sea"]), want))
             return previous["sea"], when
 
     cells = {}
@@ -1798,9 +1821,24 @@ def verdict(site, ctx):
     # the day the EPA feed went down, all 240 Irish cards read exactly what they
     # read on a healthy day, and the one new thing was pushed out of sight.
     def _urgency(g):
-        return (0 if ("could not be fetched" in g or "feed is down" in g
-                      or "not reporting" in g) else
-                1 if g.startswith("Out of bathing season") else 2)
+        # THREE KINDS, not two. The first pass put "today's failure" above
+        # everything and left every other gap tied at 2 — so the always-on
+        # rainfall gap, which IS today's news, sorted level with the permanent
+        # "no storm overflow data is published in the Republic", which is not,
+        # and the stable sort kept the boilerplate first. On an Irish card the
+        # one thing that had changed today stayed invisible.
+        #
+        # A dead monitor is standing state too: it has been off for weeks, so on
+        # the day the regulator's feed dies it must not outrank the outage.
+        if "could not be fetched" in g or "feed is down" in g:
+            return 0                      # a feed failed today
+        if g.startswith("Rainfall could not be checked"):
+            return 1                      # a reading missing today
+        if g.startswith("Out of bathing season"):
+            return 2                      # true today, and seasonal
+        if "not reporting" in g:
+            return 3                      # standing state of a monitor
+        return 4                          # standing facts about a jurisdiction
     gaps.sort(key=_urgency)
 
     return {"level": level, "why": why, "checked": checked, "gaps": gaps,
