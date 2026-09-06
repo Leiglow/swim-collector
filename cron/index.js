@@ -32,10 +32,6 @@ const WORKFLOW = "swim-collect.yml";
 // GitHub's own schedule happens to fire, this stays quiet and costs nothing.
 const MAX_AGE_MINUTES = 25;
 
-// Set by lastRunMinutes(), read by both handlers. A Worker isolate is short
-// lived and this is deliberately not state that outlives one request.
-let LAST_READ = "not tried";
-
 // WHETHER THE TOKEN STILL WORKS, told apart from every other reason the read
 // might fail. The fine-grained token this Worker carries is scoped to one
 // repository and expires; when it did, lastRunMinutes() returned null, the
@@ -47,6 +43,14 @@ let LAST_READ = "not tried";
 // So the read reports WHY it could not answer, and the public endpoint below
 // says it out loud, in one curl, without anybody opening a dashboard.
 async function lastRunMinutes(env) {
+  // RETURNS {minutes, read} — NOT a module-scope variable.
+  //
+  // This was `let LAST_READ` at module scope. A Worker isolate serves many
+  // requests and every scheduled invocation, all sharing that one binding, so
+  // two overlapping calls could have one's diagnosis reported against the
+  // other's answer: a health check could truthfully say "ok" while describing a
+  // different request's failure. On a health endpoint whose entire job is to be
+  // trusted about failures, that is the wrong kind of wrong.
   try {
     const r = await fetch(
       "https://api.github.com/repos/" + REPO + "/actions/workflows/" + WORKFLOW +
@@ -61,21 +65,38 @@ async function lastRunMinutes(env) {
       }
     );
     if (!r.ok) {
-      LAST_READ = r.status === 401 || r.status === 403
-        ? "github refused the token (" + r.status + ") — it has expired or lost "
-          + "its Actions permission"
-        : "github answered " + r.status;
-      return null;
+      // 401 IS THE TOKEN. 403 IS NOT NECESSARILY. GitHub answers 403 for
+      // secondary rate limits and abuse detection as well as for a token
+      // without permission, and telling Jay to go and reissue a working token
+      // is a bad half hour. The rate-limit headers say which.
+      const left = r.headers.get("x-ratelimit-remaining");
+      const read = r.status === 401
+        ? "github refused the token (401) — it has expired or been revoked"
+        : r.status === 403 && left === "0"
+          ? "github is rate limiting this token (403) — the token is fine"
+          : r.status === 403
+            ? "github answered 403 — the token has lost its Actions permission, "
+              + "or this is a secondary rate limit"
+            : r.status === 429
+              ? "github is rate limiting this token (429) — the token is fine"
+              : "github answered " + r.status;
+      return {minutes: null, read: read};
     }
-    LAST_READ = "ok";
     const d = await r.json();
     const run = d && d.workflow_runs && d.workflow_runs[0];
     const t = Date.parse(run && run.created_at);
-    if (!isFinite(t)) return null;
-    return (Date.now() - t) / 60000;
+    // "ok" USED TO BE SET BEFORE THE PAYLOAD WAS LOOKED AT, so a 200 carrying
+    // no runs — or a run with an unreadable date — reported {ok:false,
+    // github:"ok"}: unhealthy for no stated reason, which is the same as no
+    // reason at all.
+    if (!isFinite(t)) {
+      return {minutes: null,
+              read: "github answered, but has no readable run for this workflow"};
+    }
+    return {minutes: (Date.now() - t) / 60000, read: "ok"};
   } catch (e) {
-    LAST_READ = "could not reach github";
-    return null;                 // cannot tell — treat as due rather than skip
+    // cannot tell — treat as due rather than skip
+    return {minutes: null, read: "could not reach github"};
   }
 }
 
@@ -100,7 +121,8 @@ async function dispatch(env) {
 export default {
   async scheduled(event, env, ctx) {
     ctx.waitUntil((async () => {
-      const age = await lastRunMinutes(env);
+      const seen = await lastRunMinutes(env);
+      const age = seen.minutes;
       if (age !== null && age < MAX_AGE_MINUTES) {
         console.log("skip — collector last ran " + Math.round(age) + " minutes ago");
         return;
@@ -108,7 +130,7 @@ export default {
       const r = await dispatch(env);
       const body = r.ok ? "" : " — " + (await r.text()).slice(0, 200);
       console.log("dispatch " + r.status + " — last run " +
-                  (age === null ? "unknown (" + LAST_READ + ")"
+                  (age === null ? "unknown (" + seen.read + ")"
                                 : Math.round(age) + " min ago") + body);
     })());
   },
@@ -117,19 +139,25 @@ export default {
   // anyone spin the collector. Use the dashboard's own scheduled-event test, or
   // the workflow's Run button, to force one.
   async fetch(request, env) {
-    const age = await lastRunMinutes(env);
+    const seen = await lastRunMinutes(env);
+    const age = seen.minutes;
     const healthy = age !== null;
     return new Response(JSON.stringify({
       // NOT always true. This said ok:true while the token was dead, which is
       // the one moment a health endpoint has a job to do.
       ok: healthy,
-      github: LAST_READ,
+      github: seen.read,
       hasToken: !!(env && env.GITHUB_TOKEN),
       collectorLastRanMinutesAgo: age === null ? null : Math.round(age),
       dispatchesWhenOlderThan: MAX_AGE_MINUTES
     }, null, 1), {
       status: healthy ? 200 : 503,
-      headers: { "content-type": "application/json; charset=utf-8" }
+      headers: {
+        "content-type": "application/json; charset=utf-8",
+        // Never from a cache. A health answer that is five minutes old is a
+        // guess, and a 503 held at the edge would outlive the fault it reports.
+        "cache-control": "no-store"
+      }
     });
   }
 };
