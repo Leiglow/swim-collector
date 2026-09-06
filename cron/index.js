@@ -127,11 +127,27 @@ export default {
         console.log("skip — collector last ran " + Math.round(age) + " minutes ago");
         return;
       }
-      const r = await dispatch(env);
-      const body = r.ok ? "" : " — " + (await r.text()).slice(0, 200);
-      console.log("dispatch " + r.status + " — last run " +
-                  (age === null ? "unknown (" + seen.read + ")"
-                                : Math.round(age) + " min ago") + body);
+      // GUARDED. lastRunMinutes() catches its own fetch; this one did not, so a
+      // network failure on the dispatch itself rejected the promise handed to
+      // ctx.waitUntil — an unhandled rejection, no log line, and the one event
+      // worth knowing about (the poke did not happen) passing in silence. The
+      // failure this Worker exists to prevent, inside the Worker.
+      try {
+        const r = await dispatch(env);
+        let body = "";
+        if(!r.ok){
+          try { body = " — " + (await r.text()).slice(0, 200); }
+          catch(e){ body = " — (no body)"; }
+        }
+        console.log("dispatch " + r.status + " — last run " +
+                    (age === null ? "unknown (" + seen.read + ")"
+                                  : Math.round(age) + " min ago") + body);
+      } catch(e){
+        console.log("dispatch FAILED to reach github: " + (e && e.message) +
+                    " — last run " +
+                    (age === null ? "unknown (" + seen.read + ")"
+                                  : Math.round(age) + " min ago"));
+      }
     })());
   },
 
