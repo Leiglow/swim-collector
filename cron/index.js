@@ -20,29 +20,65 @@
 const REPO = "Leiglow/swim-collector";
 const WORKFLOW = "swim-collect.yml";
 
-// The site's own address is a plain Worker variable, not a constant, so this
-// file carries no domain and can live in the public collector repository
-// alongside the workflow it triggers.
-const SNAPSHOT_FALLBACK = "";
+// How recently the collector last SUCCEEDED, asked of GitHub rather than of the
+// site. The first version read the published snapshot instead, which worked for
+// twenty minutes and then returned null on every call: a Worker fetching a site
+// on its own Cloudflare account is an awkward path, and it is the wrong question
+// anyway. GitHub already knows when the job last ran, the token can read it, and
+// nothing about that answer depends on the website being reachable from inside
+// Cloudflare.
 
 // Only ask for a run if the published snapshot is already older than this. If
 // GitHub's own schedule happens to fire, this stays quiet and costs nothing.
 const MAX_AGE_MINUTES = 25;
 
-async function snapshotAgeMinutes(env) {
+// Set by lastRunMinutes(), read by both handlers. A Worker isolate is short
+// lived and this is deliberately not state that outlives one request.
+let LAST_READ = "not tried";
+
+// WHETHER THE TOKEN STILL WORKS, told apart from every other reason the read
+// might fail. The fine-grained token this Worker carries is scoped to one
+// repository and expires; when it did, lastRunMinutes() returned null, the
+// Worker dispatched as designed, GitHub answered 401, and the only trace was a
+// line in a log nobody reads. The site went eight hours stale saying so on
+// every page while this went on quietly failing. Standard 5 applies to the
+// plumbing as much as to the pages.
+//
+// So the read reports WHY it could not answer, and the public endpoint below
+// says it out loud, in one curl, without anybody opening a dashboard.
+async function lastRunMinutes(env) {
   try {
-    const url = (env && env.SNAPSHOT_URL) || SNAPSHOT_FALLBACK;
-    if (!url) return null;
-    const r = await fetch(url + "?cron=1", { cf: { cacheTtl: 0 } });
-    if (!r.ok) return null;
+    const r = await fetch(
+      "https://api.github.com/repos/" + REPO + "/actions/workflows/" + WORKFLOW +
+      "/runs?status=success&per_page=1",
+      {
+        headers: {
+          "authorization": "Bearer " + env.GITHUB_TOKEN,
+          "accept": "application/vnd.github+json",
+          "x-github-api-version": "2022-11-28",
+          "user-agent": "swim-collector-cron"
+        }
+      }
+    );
+    if (!r.ok) {
+      LAST_READ = r.status === 401 || r.status === 403
+        ? "github refused the token (" + r.status + ") — it has expired or lost "
+          + "its Actions permission"
+        : "github answered " + r.status;
+      return null;
+    }
+    LAST_READ = "ok";
     const d = await r.json();
-    const t = Date.parse(d && d.at);
+    const run = d && d.workflow_runs && d.workflow_runs[0];
+    const t = Date.parse(run && run.created_at);
     if (!isFinite(t)) return null;
     return (Date.now() - t) / 60000;
   } catch (e) {
+    LAST_READ = "could not reach github";
     return null;                 // cannot tell — treat as due rather than skip
   }
 }
+
 
 async function dispatch(env) {
   return fetch(
@@ -64,14 +100,16 @@ async function dispatch(env) {
 export default {
   async scheduled(event, env, ctx) {
     ctx.waitUntil((async () => {
-      const age = await snapshotAgeMinutes(env);
+      const age = await lastRunMinutes(env);
       if (age !== null && age < MAX_AGE_MINUTES) {
-        console.log("skip — snapshot is " + Math.round(age) + " minutes old");
+        console.log("skip — collector last ran " + Math.round(age) + " minutes ago");
         return;
       }
       const r = await dispatch(env);
-      console.log("dispatch " + r.status + " — snapshot age " +
-                  (age === null ? "unknown" : Math.round(age) + " min"));
+      const body = r.ok ? "" : " — " + (await r.text()).slice(0, 200);
+      console.log("dispatch " + r.status + " — last run " +
+                  (age === null ? "unknown (" + LAST_READ + ")"
+                                : Math.round(age) + " min ago") + body);
     })());
   },
 
@@ -79,11 +117,19 @@ export default {
   // anyone spin the collector. Use the dashboard's own scheduled-event test, or
   // the workflow's Run button, to force one.
   async fetch(request, env) {
-    const age = await snapshotAgeMinutes(env);
+    const age = await lastRunMinutes(env);
+    const healthy = age !== null;
     return new Response(JSON.stringify({
-      ok: true,
-      snapshotAgeMinutes: age === null ? null : Math.round(age),
+      // NOT always true. This said ok:true while the token was dead, which is
+      // the one moment a health endpoint has a job to do.
+      ok: healthy,
+      github: LAST_READ,
+      hasToken: !!(env && env.GITHUB_TOKEN),
+      collectorLastRanMinutesAgo: age === null ? null : Math.round(age),
       dispatchesWhenOlderThan: MAX_AGE_MINUTES
-    }, null, 1), { headers: { "content-type": "application/json; charset=utf-8" } });
+    }, null, 1), {
+      status: healthy ? 200 : 503,
+      headers: { "content-type": "application/json; charset=utf-8" }
+    });
   }
 };
